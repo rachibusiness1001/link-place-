@@ -17,6 +17,14 @@ app.post("/api/analyze", async (req, res) => {
     return res.status(500).json({ error: "API key not configured on server" });
   }
 
+  // Extract the root domain of the destination URL to avoid placing links on the client's own site
+  let linktoDomain = "";
+  try {
+    linktoDomain = new URL(linkto).hostname.replace(/^www\./, "");
+  } catch (e) {
+    linktoDomain = linkto;
+  }
+
   const systemPrompt = `You are a professional link building expert specializing in link insertion and niche edits.
 
 Your task:
@@ -24,21 +32,45 @@ Your task:
 2. Find the most relevant article URL from the search results on domain "${domain}"
 3. Fetch and read that article's content
 4. Identify the single best paragraph where anchor text "${anchor}" can be naturally inserted as a hyperlink to "${linkto}"
-5. Rewrite ONLY that one sentence so the anchor "${anchor}" fits naturally and fluently — not forced. Keep the rest of the paragraph unchanged.
-6. Return ONLY valid JSON, no markdown, no extra text:
+5. If needed, add a maximum of 1–2 new lines to the paragraph to naturally include the anchor. Do NOT rewrite or modify the existing paragraph content beyond that. Keep the edit strictly aligned with the blog's intent and topic.
+6. Return ONLY valid JSON, no markdown, no extra text.
 
+STRICT RULES — violating any of these means you must skip that article/paragraph and find another:
+
+PLACEMENT RULES:
+- The surrounding text must have a positive or neutral tone. Do NOT place links in negative, critical, or warning-heavy paragraphs.
+- The anchor and paragraph must be clearly topically relevant to each other. Do not force unrelated placements.
+- Do NOT place the link in the Introduction or Conclusion sections of the article.
+- Do NOT place the link in any paragraph that already contains a hyperlink.
+- Only one link per paragraph is allowed.
+- Do NOT place the link in overly promotional paragraphs or paragraphs that already feel sales-heavy or forced.
+- Do NOT place the link in paragraphs that are about a tool, software, or product feature list.
+
+ARTICLE SKIP RULES — skip the article entirely if any of these are true:
+- The article is primarily about a tool or software product (e.g., a review, tutorial, or feature breakdown of a specific tool).
+- The article is on the same website as the destination URL. The destination domain is "${linktoDomain}" — if the article's domain matches this, skip it entirely and find a different article on "${domain}".
+
+EDIT RULES:
+- Do NOT rewrite the entire paragraph.
+- You may only add 1–2 new lines to naturally include the anchor text, if the existing text does not allow a clean fit.
+- Any addition must be strictly aligned with the blog's topic and intent — no off-topic sentences.
+- The placement must feel natural and fluent, not forced or promotional.
+
+Return this JSON:
 {
   "article_url": "full URL of the article",
-  "paragraph": "exact full paragraph text from article",
-  "suggested_sentence": "the original sentence before edit",
-  "suggested_edit": "rewritten sentence with anchor naturally embedded — use [[ANCHOR]] as placeholder where the hyperlink goes",
-  "reason": "1-2 sentence explanation of why this is the best spot",
+  "paragraph": "exact full paragraph text from article (before any edit)",
+  "suggested_sentence": "the specific original sentence being edited, OR null if you are only adding new lines",
+  "suggested_edit": "the final edited/added content with [[ANCHOR]] as placeholder where the hyperlink goes",
+  "edit_type": "sentence_edit or lines_added",
+  "reason": "1-2 sentence explanation of why this is the best spot and how it follows all rules",
   "relevance_score": 85,
   "natural_fit": "high"
 }
 
 natural_fit must be: "high", "medium", or "low"
-relevance_score is 0-100 integer`;
+relevance_score is 0-100 integer
+edit_type must be: "sentence_edit" (if an existing sentence was lightly edited) or "lines_added" (if 1-2 new lines were added)`;
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -50,12 +82,12 @@ relevance_score is 0-100 integer`;
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 1000,
+        max_tokens: 1500,
         system: systemPrompt,
         messages: [
           {
             role: "user",
-            content: `Domain: ${domain}\nAnchor text: "${anchor}"\nDestination URL: ${linkto}\n\nFind the best link placement. Return JSON only.`,
+            content: `Domain: ${domain}\nAnchor text: "${anchor}"\nDestination URL: ${linkto}\nDestination domain to avoid: ${linktoDomain}\n\nFind the best link placement following all rules strictly. Return JSON only.`,
           },
         ],
         tools: [{ type: "web_search_20250305", name: "web_search" }],
