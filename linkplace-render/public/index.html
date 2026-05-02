@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LinkPlace — AI Link Placement Finder</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #13131a;
+    --surface2: #1c1c26;
+    --border: rgba(255,255,255,0.07);
+    --border-hover: rgba(255,255,255,0.15);
+    --accent: #7c6dfa;
+    --accent2: #fa6d8f;
+    --text: #f0f0f8;
+    --text2: #8888aa;
+    --text3: #55556a;
+    --green: #4ade80;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(124,109,250,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(124,109,250,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .orb1 {
+    position: fixed; top: -200px; left: -200px;
+    width: 600px; height: 600px;
+    background: radial-gradient(circle, rgba(124,109,250,0.12) 0%, transparent 70%);
+    pointer-events: none; z-index: 0;
+  }
+  .orb2 {
+    position: fixed; bottom: -200px; right: -100px;
+    width: 500px; height: 500px;
+    background: radial-gradient(circle, rgba(250,109,143,0.08) 0%, transparent 70%);
+    pointer-events: none; z-index: 0;
+  }
+
+  .container {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 0 24px;
+    position: relative;
+    z-index: 1;
+  }
+
+  header { padding: 48px 0 40px; text-align: center; }
+
+  .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+
+  .logo-icon {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .logo-icon svg { width: 18px; height: 18px; }
+
+  .logo-text {
+    font-family: 'Syne', sans-serif;
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+  }
+  .logo-text span { color: var(--accent); }
+
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(28px, 5vw, 42px);
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -1px;
+    margin-bottom: 12px;
+  }
+
+  h1 em {
+    font-style: normal;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    font-size: 15px;
+    color: var(--text2);
+    line-height: 1.6;
+    max-width: 500px;
+    margin: 0 auto;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px;
+    margin-bottom: 20px;
+    width: fit-content;
+  }
+
+  .tab {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 7px 18px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    background: transparent;
+    color: var(--text2);
+    transition: all 0.2s;
+  }
+
+  .tab.active { background: var(--surface2); color: var(--text); border: 1px solid var(--border-hover); }
+  .tab:not(.active):hover { color: var(--text); }
+
+  .form-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+    margin-bottom: 20px;
+    transition: border-color 0.3s;
+  }
+  .form-card:hover { border-color: var(--border-hover); }
+
+  .field { margin-bottom: 16px; }
+  .field:last-child { margin-bottom: 0; }
+
+  .field label {
+    display: block;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text3);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .input-wrap { position: relative; display: flex; align-items: center; }
+
+  .input-wrap .input-icon {
+    position: absolute;
+    left: 14px;
+    color: var(--text3);
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .field input {
+    width: 100%;
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    padding: 11px 14px 11px 40px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    outline: none;
+  }
+  .field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124,109,250,0.1); }
+  .field input::placeholder { color: var(--text3); }
+
+  .field-hint { font-size: 11px; color: var(--text3); margin-top: 5px; }
+
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media(max-width: 540px) { .field-row { grid-template-columns: 1fr; } }
+
+  .btn-primary {
+    width: 100%;
+    padding: 13px;
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    background: linear-gradient(135deg, var(--accent), #9c6dfa);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+    margin-top: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .btn-primary::after { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, rgba(255,255,255,0.1), transparent); opacity: 0; transition: opacity 0.2s; }
+  .btn-primary:hover::after { opacity: 1; }
+  .btn-primary:active { transform: scale(0.99); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  .error-box {
+    background: rgba(248,113,113,0.08);
+    border: 1px solid rgba(248,113,113,0.25);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--red);
+    margin-top: 12px;
+    display: none;
+  }
+  .error-box.show { display: block; }
+
+  .result-section { display: none; animation: fadeUp 0.4s ease; }
+  .result-section.show { display: block; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .loading-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px 28px;
+    margin-bottom: 20px;
+    display: none;
+  }
+  .loading-card.show { display: block; }
+
+  .loading-steps { list-style: none; }
+  .loading-steps li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    font-size: 13px;
+    color: var(--text3);
+    transition: color 0.3s;
+  }
+  .loading-steps li.active { color: var(--text); }
+  .loading-steps li.done { color: var(--green); }
+
+  .step-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--text3);
+    flex-shrink: 0;
+    transition: background 0.3s;
+  }
+  .loading-steps li.active .step-dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 1s infinite; }
+  .loading-steps li.done .step-dot { background: var(--green); }
+
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.4); opacity: 0.6; }
+  }
+
+  .result-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+    margin-bottom: 16px;
+  }
+
+  .result-tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: rgba(124,109,250,0.1);
+    border: 1px solid rgba(124,109,250,0.2);
+    padding: 3px 10px;
+    border-radius: 20px;
+    margin-bottom: 14px;
+  }
+
+  .article-url-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+  }
+
+  .article-url-row a {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    text-decoration: none;
+    word-break: break-all;
+    line-height: 1.5;
+  }
+  .article-url-row a:hover { text-decoration: underline; }
+
+  .paragraph-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    font-size: 14px;
+    line-height: 1.75;
+    color: var(--text2);
+  }
+
+  .highlight-sentence {
+    background: rgba(124,109,250,0.15);
+    border-bottom: 2px solid var(--accent);
+    color: var(--text);
+    padding: 1px 0;
+    border-radius: 2px;
+  }
+
+  .reason-text { font-size: 14px; color: var(--text2); line-height: 1.7; }
+
+  .score-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
+
+  .score-pill {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 14px;
+    border-radius: 20px;
+    font-family: 'DM Mono', monospace;
+  }
+
+  .pill-green { background: rgba(74,222,128,0.1); color: var(--green); border: 1px solid rgba(74,222,128,0.2); }
+  .pill-amber { background: rgba(251,191,36,0.1); color: var(--amber); border: 1px solid rgba(251,191,36,0.2); }
+  .pill-red   { background: rgba(248,113,113,0.1); color: var(--red);   border: 1px solid rgba(248,113,113,0.2); }
+
+  /* Suggested Edit */
+  .edit-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px; }
+  @media(max-width: 540px) { .edit-compare { grid-template-columns: 1fr; } }
+
+  .edit-col-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .edit-col-label.original { color: var(--red); }
+  .edit-col-label.suggested { color: var(--green); }
+
+  .edit-box {
+    background: var(--surface2);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+    font-size: 14px;
+    line-height: 1.75;
+    color: var(--text2);
+  }
+  .edit-box.original { border: 1px solid rgba(248,113,113,0.2); }
+  .edit-box.suggested { border: 1px solid rgba(74,222,128,0.2); }
+  .edit-box .anchor-link { color: var(--accent); text-decoration: underline; text-decoration-color: rgba(124,109,250,0.4); font-weight: 500; }
+  .original-strike { text-decoration: line-through; opacity: 0.5; }
+
+  .copy-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid rgba(74,222,128,0.25);
+    background: rgba(74,222,128,0.08);
+    color: var(--green);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: 'DM Sans', sans-serif;
+  }
+  .copy-btn:hover { background: rgba(74,222,128,0.15); }
+  .copy-btn.copied { color: var(--text2); border-color: var(--border); background: transparent; }
+
+  .bulk-placeholder { text-align: center; padding: 48px 24px; color: var(--text3); }
+  .bulk-placeholder p { font-size: 14px; margin-top: 8px; }
+
+  footer { text-align: center; padding: 48px 0 32px; font-size: 12px; color: var(--text3); }
+</style>
+</head>
+<body>
+
+<div class="orb1"></div>
+<div class="orb2"></div>
+
+<div class="container">
+  <header>
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+        </svg>
+      </div>
+      <span class="logo-text">Link<span>Place</span></span>
+    </div>
+    <h1>Find the perfect<br/><em>link placement</em></h1>
+    <p class="subtitle">Enter a domain and anchor text — AI finds the best article and suggests the exact insertion spot.</p>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" id="tab-single" onclick="switchTab('single')">Single URL</button>
+    <button class="tab" id="tab-bulk" onclick="switchTab('bulk')">Bulk CSV</button>
+  </div>
+
+  <!-- Single form -->
+  <div id="single-section">
+    <div class="form-card">
+      <div class="field">
+        <label>Domain (from page)</label>
+        <div class="input-wrap">
+          <span class="input-icon">@</span>
+          <input type="text" id="domain" placeholder="xyz.com" autocomplete="off" />
+        </div>
+        <div class="field-hint">Domain only — no need for https://</div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Anchor text</label>
+          <div class="input-wrap">
+            <span class="input-icon">#</span>
+            <input type="text" id="anchor" placeholder="web scraping proxy" />
+          </div>
+        </div>
+        <div class="field">
+          <label>Link to (destination URL)</label>
+          <div class="input-wrap">
+            <span class="input-icon">→</span>
+            <input type="text" id="linkto" placeholder="https://dest.com/page" />
+          </div>
+        </div>
+      </div>
+
+      <button class="btn-primary" id="analyze-btn" onclick="analyze()">
+        Find Best Placement ↗
+      </button>
+      <div class="error-box" id="error-box"></div>
+    </div>
+  </div>
+
+  <!-- Bulk section -->
+  <div id="bulk-section" style="display:none;">
+    <div class="form-card">
+      <div class="bulk-placeholder">
+        <div style="font-size:32px;">🚧</div>
+        <p>Bulk CSV mode — <strong style="color:var(--text2)">coming soon!</strong></p>
+        <p style="margin-top:6px;">Use single mode for now.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div class="loading-card" id="loading-card">
+    <ul class="loading-steps">
+      <li id="step-0"><span class="step-dot"></span> Searching for the best article on this domain...</li>
+      <li id="step-1"><span class="step-dot"></span> Fetching article content...</li>
+      <li id="step-2"><span class="step-dot"></span> Scanning paragraphs for relevance...</li>
+      <li id="step-3"><span class="step-dot"></span> AI finding the best anchor placement...</li>
+      <li id="step-4"><span class="step-dot"></span> Preparing your results...</li>
+    </ul>
+  </div>
+
+  <!-- Results -->
+  <div class="result-section" id="result-section">
+
+    <div class="result-card">
+      <div class="result-tag">Article Found</div>
+      <div class="article-url-row">
+        <a id="article-link" href="#" target="_blank"></a>
+      </div>
+    </div>
+
+    <div class="result-card">
+      <div class="result-tag">Best Placement Paragraph</div>
+      <div class="paragraph-box" id="paragraph-box"></div>
+      <div class="score-row" id="score-row"></div>
+    </div>
+
+    <div class="result-card">
+      <div class="result-tag">✏️ Suggested Edit</div>
+      <p style="font-size:13px;color:var(--text3);margin-bottom:14px;">Keep the rest of the paragraph as-is — only replace this one sentence so the anchor fits naturally.</p>
+      <div class="edit-compare">
+        <div>
+          <div class="edit-col-label original">✕ Original sentence</div>
+          <div class="edit-box original" id="original-sentence-box"></div>
+        </div>
+        <div>
+          <div class="edit-col-label suggested">✓ Suggested edit</div>
+          <div class="edit-box suggested" id="suggested-edit-box"></div>
+          <button class="copy-btn" id="copy-btn" onclick="copyEdit()">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy edited text
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="result-card">
+      <div class="result-tag">Why This Spot</div>
+      <p class="reason-text" id="reason-text"></p>
+    </div>
+
+  </div>
+
+  <footer>LinkPlace &mdash; AI-powered link insertion tool &mdash; v1.0</footer>
+</div>
+
+<script>
+let stepTimer, currentStep = 0;
+
+function switchTab(tab) {
+  document.getElementById('tab-single').classList.toggle('active', tab === 'single');
+  document.getElementById('tab-bulk').classList.toggle('active', tab === 'bulk');
+  document.getElementById('single-section').style.display = tab === 'single' ? 'block' : 'none';
+  document.getElementById('bulk-section').style.display = tab === 'bulk' ? 'block' : 'none';
+  document.getElementById('result-section').classList.remove('show');
+  document.getElementById('loading-card').classList.remove('show');
+}
+
+function startLoading() {
+  currentStep = 0;
+  document.getElementById('loading-card').classList.add('show');
+  for (let i = 0; i < 5; i++) document.getElementById('step-' + i).className = '';
+  document.getElementById('step-0').classList.add('active');
+  stepTimer = setInterval(() => {
+    if (currentStep < 4) {
+      document.getElementById('step-' + currentStep).className = 'done';
+      currentStep++;
+      document.getElementById('step-' + currentStep).classList.add('active');
+    }
+  }, 2800);
+}
+
+function stopLoading() {
+  clearInterval(stepTimer);
+  for (let i = 0; i <= currentStep; i++) document.getElementById('step-' + i).className = 'done';
+  setTimeout(() => document.getElementById('loading-card').classList.remove('show'), 400);
+}
+
+async function analyze() {
+  const domain = document.getElementById('domain').value.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const anchor = document.getElementById('anchor').value.trim();
+  const linkto = document.getElementById('linkto').value.trim();
+  const errBox = document.getElementById('error-box');
+  errBox.classList.remove('show');
+
+  if (!domain || !anchor || !linkto) {
+    errBox.textContent = 'Please fill in all three fields — domain, anchor text, and destination URL.';
+    errBox.classList.add('show');
+    return;
+  }
+
+  const btn = document.getElementById('analyze-btn');
+  btn.disabled = true;
+  btn.textContent = 'Analyzing...';
+  document.getElementById('result-section').classList.remove('show');
+  startLoading();
+
+  try {
+    const res = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain, anchor, linkto })
+    });
+
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Something went wrong');
+
+    stopLoading();
+
+    // Article URL
+    const articleUrl = result.article_url || '';
+    const articleLink = document.getElementById('article-link');
+    articleLink.href = articleUrl;
+    articleLink.textContent = articleUrl;
+
+    // Paragraph with highlighted sentence
+    const para = result.paragraph || '';
+    const sentence = result.suggested_sentence || '';
+    let highlighted = escapeHtml(para);
+    if (sentence && para.includes(sentence)) {
+      highlighted = highlighted.replace(
+        escapeHtml(sentence),
+        `<span class="highlight-sentence">${escapeHtml(sentence)}</span>`
+      );
+    }
+    document.getElementById('paragraph-box').innerHTML = highlighted;
+
+    // Scores
+    const score = result.relevance_score || 0;
+    const fit = result.natural_fit || 'medium';
+    const scoreClass = score >= 75 ? 'pill-green' : score >= 50 ? 'pill-amber' : 'pill-red';
+    const fitClass = fit === 'high' ? 'pill-green' : fit === 'medium' ? 'pill-amber' : 'pill-red';
+    document.getElementById('score-row').innerHTML = `
+      <span class="score-pill ${scoreClass}">Relevance: ${score}/100</span>
+      <span class="score-pill ${fitClass}">Natural fit: ${fit}</span>
+    `;
+
+    // Suggested edit comparison
+    document.getElementById('original-sentence-box').innerHTML =
+      `<span class="original-strike">${escapeHtml(result.suggested_sentence || '')}</span>`;
+
+    const editHtml = escapeHtml(result.suggested_edit || '').replace(
+      '[[ANCHOR]]',
+      `<span class="anchor-link">${escapeHtml(anchor)}</span>`
+    );
+    document.getElementById('suggested-edit-box').innerHTML = editHtml;
+    window._editPlainText = (result.suggested_edit || '').replace('[[ANCHOR]]', anchor);
+
+    // Reason
+    document.getElementById('reason-text').textContent = result.reason || '';
+
+    document.getElementById('result-section').classList.add('show');
+
+  } catch (err) {
+    stopLoading();
+    document.getElementById('loading-card').classList.remove('show');
+    document.getElementById('error-box').textContent = 'Error: ' + (err.message || 'Something went wrong. Please try again.');
+    document.getElementById('error-box').classList.add('show');
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Find Best Placement ↗';
+}
+
+function copyEdit() {
+  const text = window._editPlainText || '';
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copy-btn');
+    btn.classList.add('copied');
+    btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Copied!`;
+    setTimeout(() => {
+      btn.classList.remove('copied');
+      btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy edited text`;
+    }, 2000);
+  });
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !document.getElementById('analyze-btn').disabled) analyze();
+});
+</script>
+</body>
+</html>
