@@ -24,43 +24,25 @@ app.post("/api/analyze", async (req, res) => {
     linktoDomain = linkto;
   }
 
-  const systemPrompt = `You are a professional link building expert specializing in link insertion and niche edits.
+  const systemPrompt = `You are a link building expert. Your job is to find the best paragraph in an article where an anchor text can be naturally inserted.
 
-Your task:
-1. Use web search with query: site:${domain} ${anchor}
-2. Find the most relevant article URL from the search results on domain "${domain}"
-3. Fetch and read that article's content
-4. Identify the single best paragraph where anchor text "${anchor}" can be naturally inserted as a hyperlink to "${linkto}"
-5. If needed, add a maximum of 1-2 new lines to the paragraph to naturally include the anchor. Do NOT rewrite or modify the existing paragraph content beyond that. Keep the edit strictly aligned with the blog intent and topic.
-6. Return ONLY valid JSON. No markdown, no backticks, no extra text — pure JSON only.
+STEPS:
+1. Search: site:${domain} ${anchor}
+2. Pick the most relevant article from "${domain}" (skip tool/software articles, skip if domain matches "${linktoDomain}")
+3. Fetch ONLY the first 2000 characters of that article
+4. Find the best paragraph for anchor insertion following all rules below
+5. Return ONLY a JSON object — no markdown, no backticks, no explanation
 
-STRICT RULES — violating any of these means you must skip that article/paragraph and find another:
+RULES:
+- Positive or neutral tone paragraphs only
+- Skip intro and conclusion paragraphs
+- Skip paragraphs that already have links
+- Skip paragraphs about tools or products
+- Anchor must be topically relevant to paragraph
+- Add max 1-2 lines only if needed — do NOT rewrite existing text
 
-PLACEMENT RULES:
-- The surrounding text must have a positive or neutral tone. Do NOT place links in negative, critical, or warning-heavy paragraphs.
-- The anchor and paragraph must be clearly topically relevant. Do not force unrelated placements.
-- Do NOT place the link in the Introduction or Conclusion sections of the article.
-- Do NOT place the link in any paragraph that already contains a hyperlink.
-- Only one link per paragraph is allowed.
-- Do NOT place the link in overly promotional or sales-heavy paragraphs.
-- Do NOT place the link in paragraphs about a tool, software, or product feature list.
-
-ARTICLE SKIP RULES — skip the article entirely if any of these are true:
-- The article is primarily about a tool or software product (review, tutorial, or feature breakdown).
-- The article domain matches the destination domain "${linktoDomain}" — find a different article on "${domain}".
-
-EDIT RULES:
-- Do NOT rewrite the entire paragraph.
-- You may only add 1-2 new lines to naturally include the anchor, if existing text does not allow a clean fit.
-- Any addition must be strictly aligned with the blog topic and intent.
-- The placement must feel natural and fluent, not forced.
-
-Return ONLY this JSON object, nothing else:
-{"article_url":"full URL","paragraph":"exact paragraph text before edit","suggested_sentence":"original sentence being edited or null","suggested_edit":"edited content with [[ANCHOR]] placeholder","edit_type":"sentence_edit or lines_added","reason":"1-2 sentence explanation","relevance_score":85,"natural_fit":"high"}
-
-natural_fit: "high", "medium", or "low"
-relevance_score: integer 0-100
-edit_type: "sentence_edit" or "lines_added"`;
+OUTPUT — return this exact JSON and nothing else:
+{"article_url":"","paragraph":"","suggested_sentence":null,"suggested_edit":"sentence with [[ANCHOR]] inside","edit_type":"sentence_edit","reason":"","relevance_score":80,"natural_fit":"high"}`;
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -72,12 +54,12 @@ edit_type: "sentence_edit" or "lines_added"`;
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-5",
-        max_tokens: 1200,
+        max_tokens: 600,
         system: systemPrompt,
         messages: [
           {
             role: "user",
-            content: `Domain: ${domain}\nAnchor text: "${anchor}"\nDestination URL: ${linkto}\nDestination domain to avoid: ${linktoDomain}\n\nFind the best placement. Return pure JSON only, no markdown.`,
+            content: `Domain: ${domain}\nAnchor: "${anchor}"\nLink to: ${linkto}\nAvoid domain: ${linktoDomain}\n\nReturn JSON only.`,
           },
         ],
         tools: [{ type: "web_search_20250305", name: "web_search" }],
@@ -95,22 +77,17 @@ edit_type: "sentence_edit" or "lines_added"`;
       .filter(Boolean)
       .join("\n");
 
-    const clean = fullText.replace(/```json|```/g, "").trim();
+    // Extract JSON from response — handles extra text before/after
+    const jsonMatch = fullText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return res.status(500).json({ error: "No valid placement found. Try a different domain or anchor." });
+    }
 
     let result;
     try {
-      result = JSON.parse(clean);
+      result = JSON.parse(jsonMatch[0]);
     } catch (e) {
-      const match = clean.match(/\{[\s\S]*\}/);
-      if (match) {
-        try {
-          result = JSON.parse(match[0]);
-        } catch (e2) {
-          return res.status(500).json({ error: "Could not parse AI response", raw: clean });
-        }
-      } else {
-        return res.status(500).json({ error: "Could not parse AI response", raw: clean });
-      }
+      return res.status(500).json({ error: "No valid placement found. Try a different domain or anchor." });
     }
 
     return res.status(200).json(result);
