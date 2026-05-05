@@ -82,7 +82,7 @@ edit_type must be: "sentence_edit" (if an existing sentence was lightly edited) 
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-5",
-        max_tokens: 1500,
+       max_tokens: 2000,
         system: systemPrompt,
         messages: [
           {
@@ -113,7 +113,7 @@ edit_type must be: "sentence_edit" (if an existing sentence was lightly edited) 
     } catch (e) {
       const match = clean.match(/\{[\s\S]*\}/);
       if (match) result = JSON.parse(match[0]);
-      else throw new Error("Could not parse AI response");
+      console.log("Raw AI response:", clean);
     }
 
     return res.status(200).json(result);
