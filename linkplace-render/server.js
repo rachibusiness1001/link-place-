@@ -15,25 +15,40 @@ function getCacheKey(domain, anchor) {
   return `${domain}::${anchor.toLowerCase().trim()}`;
 }
 
-// ─── Step 1: Google Custom Search (NO AI) ──────────────────────────────────────
+// ─── Step 1: DuckDuckGo Search (FREE, NO API KEY) ──────────────────────────────
 async function searchArticles(domain, anchor) {
   const query = `site:${domain} ${anchor}`;
   console.log(`[SEARCH] Query: ${query}`);
 
-  const response = await axios.get("https://www.googleapis.com/customsearch/v1", {
-    params: {
-      key: process.env.GOOGLE_API_KEY,
-      cx: process.env.GOOGLE_CSE_ID,
-      q: query,
-      num: 5,
+  const response = await axios.get("https://html.duckduckgo.com/html/", {
+    params: { q: query },
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml",
     },
     timeout: 10000,
   });
 
-  const items = response.data.items || [];
-  const urls = items.slice(0, 3).map((r) => r.link).filter(Boolean);
-  console.log(`[SEARCH] Found URLs: ${urls.join(", ")}`);
-  return urls;
+  const $ = cheerio.load(response.data);
+  const urls = [];
+
+  $(".result__url").each((_, el) => {
+    let url = $(el).text().trim();
+    if (url && !url.startsWith("http")) url = "https://" + url;
+    if (url && url.includes(domain)) urls.push(url);
+  });
+
+  // Also try result links
+  if (urls.length === 0) {
+    $(".result__a").each((_, el) => {
+      const href = $(el).attr("href");
+      if (href && href.includes(domain)) urls.push(href);
+    });
+  }
+
+  const unique = [...new Set(urls)].slice(0, 3);
+  console.log(`[SEARCH] Found URLs: ${unique.join(", ")}`);
+  return unique;
 }
 
 // ─── Step 2: Scrape Paragraphs via Cheerio (NO AI) ─────────────────────────────
@@ -56,16 +71,14 @@ async function scrapeParagraphs(url, anchor) {
       const text = $(el).text().trim();
       const hasLink = $(el).find("a").length > 0;
 
-      if (text.length < 80) return;        // too short
-      if (hasLink) return;                  // already has link
-      if (seen.has(text)) return;           // duplicate
+      if (text.length < 80) return;
+      if (hasLink) return;
+      if (seen.has(text)) return;
 
-      // Skip intro/conclusion
       const lower = text.toLowerCase();
       const skipKeywords = ["in conclusion", "in summary", "to summarize", "in this article", "we will cover", "table of contents", "in this guide", "in this post"];
       if (skipKeywords.some((kw) => lower.startsWith(kw))) return;
 
-      // Basic relevance check
       const anchorWords = anchor.toLowerCase().split(" ");
       const hasRelevance = anchorWords.some((word) => word.length > 3 && lower.includes(word));
       if (!hasRelevance) return;
@@ -128,11 +141,10 @@ app.post("/api/analyze", async (req, res) => {
   if (!domain || !anchor || !linkto) {
     return res.status(400).json({ error: "domain, anchor, and linkto are required" });
   }
-  if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
-  if (!process.env.GOOGLE_API_KEY) return res.status(500).json({ error: "GOOGLE_API_KEY not configured" });
-  if (!process.env.GOOGLE_CSE_ID) return res.status(500).json({ error: "GOOGLE_CSE_ID not configured" });
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
+  }
 
-  // Cache check
   const cacheKey = getCacheKey(domain, anchor);
   if (cache[cacheKey] && Date.now() - cache[cacheKey].time < CACHE_TTL) {
     console.log(`[CACHE] Hit for ${cacheKey}`);
@@ -147,14 +159,11 @@ app.post("/api/analyze", async (req, res) => {
   }
 
   try {
-    // Step 1: Search
     const urls = await searchArticles(domain, anchor);
     if (!urls.length) return res.status(404).json({ error: "No articles found for this domain and anchor." });
 
-    // Filter own domain
     const filteredUrls = urls.filter((url) => !url.includes(linktoDomain));
 
-    // Step 2: Scrape
     let allParagraphs = [];
     let articleUrl = "";
 
@@ -169,7 +178,6 @@ app.post("/api/analyze", async (req, res) => {
 
     if (!allParagraphs.length) return res.status(404).json({ error: "No suitable paragraphs found. Try a different anchor or domain." });
 
-    // Step 3: AI
     const aiResult = await analyzeWithAI(allParagraphs, anchor, linkto);
 
     const finalResult = {
