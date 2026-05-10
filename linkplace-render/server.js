@@ -206,7 +206,7 @@ Return ONLY JSON: {"paragraph":"","suggested_edit":"","relevance_score":0}`;
     // FIX 7
     signal: AbortSignal.timeout(30000),
     body: JSON.stringify({
-      model: "claude-3-haiku-20240307",
+model: "claude-haiku-4-5-20251001",
       max_tokens: 200,
       // FIX 6: Stable temperature for consistent JSON output
       temperature: 0.2,
