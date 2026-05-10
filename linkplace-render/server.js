@@ -48,10 +48,14 @@ function isArticleUrl(url) {
 }
 
 // ─── Step 1: SerpAPI Google Search ────────────────────────────────────────────
-async function searchArticles(domain, anchor) {
+async function searchArticles(domain, anchor, keywords) {
+  // Build smart queries using keywords if provided
+  const keywordStr = keywords ? keywords.split(",").map(k => k.trim()).filter(Boolean).slice(0, 3).join(" ") : "";
+  const searchTerm = keywordStr || anchor;
+
   const queries = [
-    `site:${domain} ${anchor} article`,
-    `site:${domain} ${anchor} guide`,
+    `site:${domain} ${searchTerm}`,
+    `site:${domain} ${searchTerm} guide`,
     `site:${domain} ${anchor}`,
     `site:${domain} blog`,
   ];
@@ -236,7 +240,7 @@ Return ONLY this JSON, no markdown, no backticks:
 
 // ─── Main API Route ────────────────────────────────────────────────────────────
 app.post("/api/analyze", async (req, res) => {
-  const { domain, anchor, linkto } = req.body;
+  const { domain, anchor, linkto, keywords } = req.body;
 
   if (!domain || !anchor || !linkto) {
     return res.status(400).json({ error: "domain, anchor, and linkto are required" });
@@ -262,7 +266,7 @@ app.post("/api/analyze", async (req, res) => {
   }
 
   try {
-    const urls = await searchArticles(domain, anchor);
+    const urls = await searchArticles(domain, anchor, keywords);
     if (!urls.length) {
       return res.status(404).json({ error: "No articles found. Try a different domain or anchor." });
     }
