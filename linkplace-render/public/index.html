@@ -472,15 +472,6 @@
         </div>
       </div>
 
-      <div class="field">
-        <label>Target Keywords <span style="color:var(--accent);font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;">(optional but recommended)</span></label>
-        <div class="input-wrap">
-          <span class="input-icon">⌖</span>
-          <input type="text" id="keywords" placeholder="invoice templates, billing, finance" />
-        </div>
-        <div class="field-hint">Add relevant keywords to find better article matches — comma separated</div>
-      </div>
-
       <button class="btn-primary" id="analyze-btn" onclick="analyze()">
         Find Best Placement ↗
       </button>
@@ -610,8 +601,7 @@ async function analyze() {
     const res = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      const keywords = document.getElementById("keywords").value.trim();
-      body: JSON.stringify({ domain, anchor, linkto, keywords })
+      body: JSON.stringify({ domain, anchor, linkto })
     });
 
     const result = await res.json();
