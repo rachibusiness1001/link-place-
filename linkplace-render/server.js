@@ -47,11 +47,39 @@ function isArticleUrl(url) {
   }
 }
 
+// ─── AI Topic Extractor (cheap — ~$0.00004 per call) ──────────────────────────
+async function extractTopics(anchor, linkto) {
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      signal: AbortSignal.timeout(10000),
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 30,
+        messages: [{
+          role: "user",
+          content: `Give 3 short search keywords for: anchor="${anchor}" url="${linkto}". Return ONLY comma-separated keywords, nothing else.`
+        }],
+      }),
+    });
+    const data = await response.json();
+    const text = (data.content || []).map(i => i.type === "text" ? i.text : "").join("").trim();
+    console.log(`[TOPICS] Extracted: ${text}`);
+    return text;
+  } catch (err) {
+    console.log(`[TOPICS] Failed: ${err.message}`);
+    return anchor;
+  }
+}
+
 // ─── Step 1: SerpAPI Google Search ────────────────────────────────────────────
-async function searchArticles(domain, anchor, keywords) {
-  // Build smart queries using keywords if provided
-  const keywordStr = keywords ? keywords.split(",").map(k => k.trim()).filter(Boolean).slice(0, 3).join(" ") : "";
-  const searchTerm = keywordStr || anchor;
+async function searchArticles(domain, anchor, topics) {
+  const searchTerm = topics || anchor;
 
   const queries = [
     `site:${domain} ${searchTerm}`,
@@ -240,7 +268,7 @@ Return ONLY this JSON, no markdown, no backticks:
 
 // ─── Main API Route ────────────────────────────────────────────────────────────
 app.post("/api/analyze", async (req, res) => {
-  const { domain, anchor, linkto, keywords } = req.body;
+  const { domain, anchor, linkto } = req.body;
 
   if (!domain || !anchor || !linkto) {
     return res.status(400).json({ error: "domain, anchor, and linkto are required" });
@@ -266,7 +294,9 @@ app.post("/api/analyze", async (req, res) => {
   }
 
   try {
-    const urls = await searchArticles(domain, anchor, keywords);
+// Step 0: Extract topics via AI (very cheap ~$0.00004)
+    const topics = await extractTopics(anchor, linkto);
+    const urls = await searchArticles(domain, anchor, topics);
     if (!urls.length) {
       return res.status(404).json({ error: "No articles found. Try a different domain or anchor." });
     }
