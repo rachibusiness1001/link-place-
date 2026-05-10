@@ -15,51 +15,70 @@ function getCacheKey(domain, anchor) {
   return `${domain}::${anchor.toLowerCase().trim()}`;
 }
 
-// ─── Step 1: DuckDuckGo Search (FREE, NO API KEY) ──────────────────────────────
+// ─── Step 1: DuckDuckGo Search (FREE) ──────────────────────────────────────────
 async function searchArticles(domain, anchor) {
   const query = `site:${domain} ${anchor}`;
   console.log(`[SEARCH] Query: ${query}`);
 
-  const response = await axios.get("https://html.duckduckgo.com/html/", {
-    params: { q: query },
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Accept": "text/html,application/xhtml+xml",
-    },
-    timeout: 10000,
-  });
+  try {
+    const response = await axios.post(
+      "https://html.duckduckgo.com/html/",
+      `q=${encodeURIComponent(query)}`,
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.5",
+          "Referer": "https://duckduckgo.com/",
+        },
+        timeout: 20000,
+        maxRedirects: 5,
+      }
+    );
 
-  const $ = cheerio.load(response.data);
-  const urls = [];
+    const $ = cheerio.load(response.data);
+    const urls = [];
 
-  $(".result__url").each((_, el) => {
-    let url = $(el).text().trim();
-    if (url && !url.startsWith("http")) url = "https://" + url;
-    if (url && url.includes(domain)) urls.push(url);
-  });
-
-  // Also try result links
-  if (urls.length === 0) {
-    $(".result__a").each((_, el) => {
+    $("a.result__a").each((_, el) => {
       const href = $(el).attr("href");
-      if (href && href.includes(domain)) urls.push(href);
+      if (href && href.includes(domain)) {
+        urls.push(href);
+      }
     });
-  }
 
-  const unique = [...new Set(urls)].slice(0, 3);
-  console.log(`[SEARCH] Found URLs: ${unique.join(", ")}`);
-  return unique;
+    // Fallback: try result__url
+    if (urls.length === 0) {
+      $(".result__url").each((_, el) => {
+        let url = $(el).text().trim();
+        if (url && url.includes(domain)) {
+          if (!url.startsWith("http")) url = "https://" + url;
+          urls.push(url);
+        }
+      });
+    }
+
+    const unique = [...new Set(urls)].slice(0, 3);
+    console.log(`[SEARCH] Found ${unique.length} URLs: ${unique.join(", ")}`);
+    return unique;
+  } catch (err) {
+    console.log(`[SEARCH] DuckDuckGo failed: ${err.message}`);
+    return [];
+  }
 }
 
-// ─── Step 2: Scrape Paragraphs via Cheerio (NO AI) ─────────────────────────────
+// ─── Step 2: Scrape Paragraphs (NO AI) ─────────────────────────────────────────
 async function scrapeParagraphs(url, anchor) {
   console.log(`[SCRAPE] Fetching: ${url}`);
   try {
     const response = await axios.get(url, {
-      timeout: 8000,
+      timeout: 20000,
+      maxRedirects: 5,
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Connection": "keep-alive",
       },
     });
 
@@ -76,9 +95,14 @@ async function scrapeParagraphs(url, anchor) {
       if (seen.has(text)) return;
 
       const lower = text.toLowerCase();
-      const skipKeywords = ["in conclusion", "in summary", "to summarize", "in this article", "we will cover", "table of contents", "in this guide", "in this post"];
+      const skipKeywords = [
+        "in conclusion", "in summary", "to summarize",
+        "in this article", "we will cover", "table of contents",
+        "in this guide", "in this post", "in this tutorial"
+      ];
       if (skipKeywords.some((kw) => lower.startsWith(kw))) return;
 
+      // Relevance check
       const anchorWords = anchor.toLowerCase().split(" ");
       const hasRelevance = anchorWords.some((word) => word.length > 3 && lower.includes(word));
       if (!hasRelevance) return;
@@ -88,27 +112,25 @@ async function scrapeParagraphs(url, anchor) {
     });
 
     const limited = paragraphs.slice(0, 8);
-    console.log(`[SCRAPE] ${limited.length} paragraphs found after filtering`);
+    console.log(`[SCRAPE] ${limited.length} valid paragraphs found`);
     return limited;
   } catch (err) {
-    console.log(`[SCRAPE] Failed: ${err.message}`);
+    console.log(`[SCRAPE] Failed for ${url}: ${err.message}`);
     return [];
   }
 }
 
-// ─── Step 3: Claude Haiku — Only paragraph selection (LOW COST) ────────────────
+// ─── Step 3: Claude Haiku — Paragraph Selection Only (LOW COST) ────────────────
 async function analyzeWithAI(paragraphs, anchor, linkto) {
   const paragraphText = paragraphs.map((p, i) => `[${i + 1}] ${p}`).join("\n\n");
-  console.log(`[AI] Input: ${paragraphText.length} chars, ${paragraphs.length} paragraphs`);
+  console.log(`[AI] Sending ${paragraphs.length} paragraphs, ${paragraphText.length} chars`);
 
-  const prompt = `Pick the best paragraph to insert anchor "${anchor}" as a hyperlink to ${linkto}.
-Rules: positive tone, natural fit, do not rewrite — minimal edit only, use [[ANCHOR]] as placeholder.
+  const prompt = `Pick the best paragraph to insert anchor "${anchor}" linking to ${linkto}.
+Rules: positive tone only, natural fit, minimal edit, use [[ANCHOR]] placeholder.
 
-Paragraphs:
 ${paragraphText}
 
-Return ONLY JSON:
-{"paragraph":"","suggested_edit":"","relevance_score":0}`;
+Return ONLY JSON: {"paragraph":"","suggested_edit":"","relevance_score":0}`;
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -118,7 +140,7 @@ Return ONLY JSON:
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
+      model: "claude-3-haiku-20240307",
       max_tokens: 200,
       messages: [{ role: "user", content: prompt }],
     }),
@@ -128,6 +150,8 @@ Return ONLY JSON:
   if (data.error) throw new Error(data.error.message);
 
   const text = (data.content || []).map((i) => (i.type === "text" ? i.text : "")).join("");
+  console.log(`[AI] Raw response: ${text}`);
+
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("Could not parse AI response");
 
@@ -145,6 +169,7 @@ app.post("/api/analyze", async (req, res) => {
     return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
   }
 
+  // Cache check
   const cacheKey = getCacheKey(domain, anchor);
   if (cache[cacheKey] && Date.now() - cache[cacheKey].time < CACHE_TTL) {
     console.log(`[CACHE] Hit for ${cacheKey}`);
@@ -159,11 +184,16 @@ app.post("/api/analyze", async (req, res) => {
   }
 
   try {
+    // Step 1: Search
     const urls = await searchArticles(domain, anchor);
-    if (!urls.length) return res.status(404).json({ error: "No articles found for this domain and anchor." });
+    if (!urls.length) {
+      return res.status(404).json({ error: "No articles found. Try a different domain or anchor." });
+    }
 
+    // Filter own domain
     const filteredUrls = urls.filter((url) => !url.includes(linktoDomain));
 
+    // Step 2: Scrape
     let allParagraphs = [];
     let articleUrl = "";
 
@@ -176,8 +206,11 @@ app.post("/api/analyze", async (req, res) => {
       }
     }
 
-    if (!allParagraphs.length) return res.status(404).json({ error: "No suitable paragraphs found. Try a different anchor or domain." });
+    if (!allParagraphs.length) {
+      return res.status(404).json({ error: "No suitable paragraphs found. Try a different anchor or domain." });
+    }
 
+    // Step 3: AI analysis
     const aiResult = await analyzeWithAI(allParagraphs, anchor, linkto);
 
     const finalResult = {
