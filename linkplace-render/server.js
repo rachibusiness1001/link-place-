@@ -11,8 +11,9 @@ app.use(express.static(path.join(__dirname, "public")));
 const cache = {};
 const CACHE_TTL = 60 * 60 * 1000;
 
-function getCacheKey(domain, anchor) {
-  return `${domain}::${anchor.toLowerCase().trim()}`;
+// FIX 8: Cache key now includes linkto
+function getCacheKey(domain, anchor, linkto) {
+  return `${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}`;
 }
 
 // ─── Retry Helper ──────────────────────────────────────────────────────────────
@@ -28,56 +29,38 @@ async function withRetry(fn, maxAttempts = 2, delay = 1000) {
   }
 }
 
-// ─── Step 1: Google Search (Reliable) ─────────────────────────────────────────
+// ─── Step 1: SerpApi Google Search ────────────────────────────────────────────
 async function searchArticles(domain, anchor) {
-  const anchorTopic = anchor.split(/\s+/).slice(0, 3).join(" ");
+  // FIX 2: Exact match support with quoted anchor
   const queries = [
-    `site:${domain} ${anchorTopic}`,
-    `site:${domain} blog ${anchorTopic}`,
+    `site:${domain} "${anchor}"`,
+    `site:${domain} ${anchor}`,
+    `site:${domain} blog ${anchor}`,
     `site:${domain}`,
   ];
 
   for (const query of queries) {
     console.log(`[SEARCH] Query: ${query}`);
     try {
-      const urls = await withRetry(async () => {
-        const response = await axios.get(
-          `https://www.google.com/search?q=${encodeURIComponent(query)}&num=10`,
-          {
-            headers: {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-              "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-              "Accept-Language": "en-US,en;q=0.5",
-            },
-            timeout: 20000,
-            maxRedirects: 5,
-          }
-        );
+      const response = await withRetry(() =>
+        axios.get("https://serpapi.com/search", {
+          params: {
+            q: query,
+            api_key: process.env.SERPAPI_KEY,
+            engine: "google",
+            num: 10,
+          },
+          timeout: 20000,
+        })
+      );
 
-        const $ = cheerio.load(response.data);
-        const urls = [];
+      const results = response.data?.organic_results || [];
+      const urls = results
+        .map((r) => r.link)
+        .filter((url) => url && url.includes(domain))
+        .slice(0, 5);
 
-        $("a").each((_, el) => {
-          const href = $(el).attr("href");
-          if (href && href.startsWith("/url?q=")) {
-            const real = decodeURIComponent(
-              href.replace("/url?q=", "").split("&")[0]
-            );
-            if (
-              real.includes(domain) &&
-              real.startsWith("http") &&
-              !real.includes("google.com")
-            ) {
-              urls.push(real);
-            }
-          }
-        });
-
-        const unique = [...new Set(urls)].slice(0, 5);
-        console.log(`[SEARCH] Found ${unique.length} URLs: ${unique.join(", ")}`);
-        return unique;
-      });
-
+      console.log(`[SEARCH] Found ${urls.length} URLs: ${urls.join(", ")}`);
       if (urls.length > 0) return urls;
     } catch (err) {
       console.log(`[SEARCH] Query failed: ${err.message}`);
@@ -93,11 +76,25 @@ function cleanHtml($) {
   return $;
 }
 
+// ─── FIX 3: Detect Cloudflare / Bot Protection ────────────────────────────────
+function isBlockedPage(html) {
+  const lower = html.toLowerCase();
+  return (
+    lower.includes("cf-browser-verification") ||
+    lower.includes("cloudflare") ||
+    lower.includes("attention required") ||
+    lower.includes("enable javascript and cookies") ||
+    lower.includes("please enable cookies") ||
+    lower.includes("ddos protection")
+  );
+}
+
 // ─── Lightweight Semantic Scoring ─────────────────────────────────────────────
 function scoreParagraph(text, anchor) {
   let score = 0;
   const lower = text.toLowerCase();
-  const anchorWords = anchor.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+  // FIX 1: Allow shorter technical words like ai, llm, 403
+  const anchorWords = anchor.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
   const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 20);
 
   const wordCount = text.split(/\s+/).length;
@@ -112,6 +109,11 @@ function scoreParagraph(text, anchor) {
 
   const anchorPhrase = anchor.toLowerCase();
   if (lower.includes(anchorPhrase)) score += 30;
+
+  // FIX 1: Bonus for partial technical phrase match
+  const anchorParts = anchorPhrase.split(/\s+/);
+  const partialMatch = anchorParts.filter((w) => w.length > 2 && lower.includes(w)).length;
+  if (partialMatch >= Math.ceil(anchorParts.length / 2)) score += 15;
 
   const capsRatio = (text.match(/[A-Z]/g) || []).length / text.length;
   if (capsRatio < 0.15) score += 10;
@@ -138,6 +140,12 @@ async function scrapeParagraphs(url, anchor) {
         },
       });
 
+      // FIX 3: Detect and skip blocked pages
+      if (isBlockedPage(response.data)) {
+        console.log(`[SCRAPE] Blocked page detected (Cloudflare/bot protection): ${url}`);
+        return [];
+      }
+
       let $ = cheerio.load(response.data);
       $ = cleanHtml($);
 
@@ -158,12 +166,15 @@ async function scrapeParagraphs(url, anchor) {
         scoredParagraphs.push({ text, score });
       });
 
+      // FIX 4: Filter weak paragraphs before sending to AI
+      // FIX 5: Trim long paragraphs to reduce token usage
       const top = scoredParagraphs
+        .filter((p) => p.score > 15)
         .sort((a, b) => b.score - a.score)
         .slice(0, 8)
-        .map((p) => p.text);
+        .map((p) => p.text.slice(0, 1200));
 
-      console.log(`[SCRAPE] ${scoredParagraphs.length} paragraphs found, sending top ${top.length} to AI`);
+      console.log(`[SCRAPE] ${scoredParagraphs.length} total, ${top.length} quality paragraphs sending to AI`);
       return top;
     });
   } catch (err) {
@@ -184,6 +195,7 @@ ${paragraphText}
 
 Return ONLY JSON: {"paragraph":"","suggested_edit":"","relevance_score":0}`;
 
+  // FIX 7: AbortSignal timeout to prevent hanging requests
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -191,9 +203,13 @@ Return ONLY JSON: {"paragraph":"","suggested_edit":"","relevance_score":0}`;
       "x-api-key": process.env.ANTHROPIC_API_KEY,
       "anthropic-version": "2023-06-01",
     },
+    // FIX 7
+    signal: AbortSignal.timeout(30000),
     body: JSON.stringify({
       model: "claude-3-haiku-20240307",
       max_tokens: 200,
+      // FIX 6: Stable temperature for consistent JSON output
+      temperature: 0.2,
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -220,8 +236,12 @@ app.post("/api/analyze", async (req, res) => {
   if (!process.env.ANTHROPIC_API_KEY) {
     return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
   }
+  if (!process.env.SERPAPI_KEY) {
+    return res.status(500).json({ error: "SERPAPI_KEY not configured" });
+  }
 
-  const cacheKey = getCacheKey(domain, anchor);
+  // FIX 8: Cache key includes linkto
+  const cacheKey = getCacheKey(domain, anchor, linkto);
   if (cache[cacheKey] && Date.now() - cache[cacheKey].time < CACHE_TTL) {
     console.log(`[CACHE] Hit for ${cacheKey}`);
     return res.status(200).json({ ...cache[cacheKey].data, cached: true });
