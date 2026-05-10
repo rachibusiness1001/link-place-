@@ -16,168 +16,205 @@ function getCacheKey(domain, anchor) {
 }
 
 // ─── Retry Helper ──────────────────────────────────────────────────────────────
-async function withRetry(fn, retries = 2, delay = 1000) {
-  for (let i = 0; i <= retries; i++) {
+async function withRetry(fn, maxAttempts = 2, delay = 1000) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      if (i === retries) throw err;
-      console.log(`[RETRY] Attempt ${i + 1} failed: ${err.message}. Retrying...`);
-      await new Promise((r) => setTimeout(r, delay));
+      if (attempt === maxAttempts) throw err;
+      console.log(`[RETRY] Attempt ${attempt} failed: ${err.message}. Retrying in ${delay}ms...`);
+      await new Promise((res) => setTimeout(res, delay));
     }
   }
 }
 
 // ─── Decode DuckDuckGo Redirect URLs ──────────────────────────────────────────
-function decodeDDGUrl(href) {
+function decodeDuckDuckGoUrl(href) {
   if (!href) return null;
-  if (href.includes("uddg=")) {
-    try {
-      const url = new URL("https://duckduckgo.com" + href);
-      const uddg = url.searchParams.get("uddg");
-      if (uddg) return decodeURIComponent(uddg);
-    } catch (e) {}
+  try {
+    if (href.includes("uddg=")) {
+      const match = href.match(/uddg=([^&]+)/);
+      if (match) return decodeURIComponent(match[1]);
+    }
+    if (href.startsWith("http")) return href;
+    return null;
+  } catch {
+    return null;
   }
-  if (href.startsWith("http")) return href;
-  return null;
 }
 
 // ─── Step 1: DuckDuckGo Search (FREE) ──────────────────────────────────────────
 async function searchArticles(domain, anchor) {
-  // Broad query — not exact anchor match
-  const query = `site:${domain} blog`;
-  console.log(`[SEARCH] Query: ${query}`);
+  const queries = [
+    `site:${domain} blog`,
+    `site:${domain}`,
+  ];
 
-  return withRetry(async () => {
-    const response = await axios.post(
-      "https://html.duckduckgo.com/html/",
-      `q=${encodeURIComponent(query)}&b=&kl=&df=`,
-      {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Content-Type": "application/x-www-form-urlencoded",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.5",
-          "Origin": "https://duckduckgo.com",
-          "Referer": "https://duckduckgo.com/",
-        },
-        timeout: 20000,
-        maxRedirects: 5,
+  for (const query of queries) {
+    console.log(`[SEARCH] Query: ${query}`);
+    try {
+      const urls = await withRetry(async () => {
+        const response = await axios.post(
+          "https://html.duckduckgo.com/html/",
+          `q=${encodeURIComponent(query)}`,
+          {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "Content-Type": "application/x-www-form-urlencoded",
+              "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+              "Accept-Language": "en-US,en;q=0.5",
+              "Referer": "https://duckduckgo.com/",
+            },
+            timeout: 20000,
+            maxRedirects: 5,
+          }
+        );
+
+        const $ = cheerio.load(response.data);
+        const urls = [];
+
+        // Multiple selectors with fallback
+        const selectors = ["a.result__a", ".result__title a", "h2.result__title a", ".results .result a"];
+        for (const selector of selectors) {
+          $(selector).each((_, el) => {
+            const href = $(el).attr("href");
+            const decoded = decodeDuckDuckGoUrl(href);
+            if (decoded && decoded.includes(domain)) {
+              urls.push(decoded);
+            }
+          });
+          if (urls.length > 0) break;
+        }
+
+        // Fallback: result__url text
+        if (urls.length === 0) {
+          $(".result__url").each((_, el) => {
+            let url = $(el).text().trim();
+            if (url && url.includes(domain)) {
+              if (!url.startsWith("http")) url = "https://" + url;
+              urls.push(url);
+            }
+          });
+        }
+
+        // Regex fallback on raw HTML
+        if (urls.length === 0) {
+          const rawHtml = response.data;
+          const regex = /https?:\/\/[^\s"'<>]*domain[^\s"'<>]*/g;
+          const domainEscaped = domain.replace(/\./g, "\\.");
+          const domainRegex = new RegExp(`https?:\\/\\/[^\\s"'<>]*${domainEscaped}[^\\s"'<>]*`, "g");
+          const matches = rawHtml.match(domainRegex) || [];
+          urls.push(...matches.map((u) => decodeURIComponent(u)));
+        }
+
+        return [...new Set(urls)].slice(0, 5);
+      });
+
+      if (urls.length > 0) {
+        console.log(`[SEARCH] Found ${urls.length} URLs: ${urls.join(", ")}`);
+        return urls;
       }
-    );
-
-    const $ = cheerio.load(response.data);
-    const urls = [];
-
-    // Primary selectors
-    const selectors = ["a.result__a", ".result__a", "a.result-link", ".result h2 a", "h2 a"];
-    for (const selector of selectors) {
-      $(selector).each((_, el) => {
-        const decoded = decodeDDGUrl($(el).attr("href"));
-        if (decoded && decoded.includes(domain)) urls.push(decoded);
-      });
-      if (urls.length > 0) break;
+    } catch (err) {
+      console.log(`[SEARCH] Query failed: ${err.message}`);
     }
+  }
 
-    // Fallback: all links
-    if (urls.length === 0) {
-      $("a").each((_, el) => {
-        const decoded = decodeDDGUrl($(el).attr("href"));
-        if (decoded && decoded.includes(domain)) urls.push(decoded);
-      });
-    }
-
-    // Regex fallback
-    if (urls.length === 0) {
-      const regex = new RegExp(`https?://[\\w./%-]*${domain.replace(".", "\\.")}[\\w./%-]*`, "g");
-      const matches = response.data.match(regex) || [];
-      urls.push(...matches);
-    }
-
-    const unique = [...new Set(urls)].slice(0, 3);
-    console.log(`[SEARCH] Found ${unique.length} URLs: ${unique.join(", ")}`);
-    return unique;
-  });
+  return [];
 }
 
-// ─── Lightweight Semantic Scorer ───────────────────────────────────────────────
-function scoreParapraph(text, anchor) {
+// ─── HTML Cleanup ──────────────────────────────────────────────────────────────
+function cleanHtml($) {
+  $("script, style, noscript, iframe, nav, footer, header, aside").remove();
+  return $;
+}
+
+// ─── Lightweight Semantic Scoring ─────────────────────────────────────────────
+function scoreparagraph(text, anchor) {
   let score = 0;
   const lower = text.toLowerCase();
-  const anchorWords = anchor.toLowerCase().split(" ").filter((w) => w.length > 3);
+  const anchorWords = anchor.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+  const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 20);
 
-  // Topical overlap
-  anchorWords.forEach((word) => {
-    if (lower.includes(word)) score += 10;
-  });
+  // Word count quality
+  const wordCount = text.split(/\s+/).length;
+  if (wordCount >= 50 && wordCount <= 200) score += 20;
+  else if (wordCount >= 30) score += 10;
 
-  // Sentence richness — longer paragraphs score higher
-  if (text.length > 200) score += 5;
-  if (text.length > 350) score += 5;
+  // Sentence richness
+  if (sentences.length >= 2) score += 15;
+  if (sentences.length >= 3) score += 10;
 
-  // Readability — not too many special chars
-  const specialChars = (text.match(/[^a-zA-Z0-9\s.,!?]/g) || []).length;
-  if (specialChars < 10) score += 3;
+  // Topical overlap with anchor
+  const anchorMatchCount = anchorWords.filter((word) => lower.includes(word)).length;
+  score += anchorMatchCount * 15;
 
-  // Penalize if starts with list-like patterns
-  if (/^[\d\-\*\•]/.test(text.trim())) score -= 5;
+  // Partial/semantic anchor phrase presence
+  const anchorPhrase = anchor.toLowerCase();
+  if (lower.includes(anchorPhrase)) score += 30;
+
+  // Readability: no excessive caps, numbers, special chars
+  const capsRatio = (text.match(/[A-Z]/g) || []).length / text.length;
+  if (capsRatio < 0.15) score += 10;
+
+  // Penalize very short or very long
+  if (wordCount < 30) score -= 20;
+  if (wordCount > 300) score -= 10;
 
   return score;
 }
 
-// ─── Step 2: Scrape Paragraphs (NO AI) ─────────────────────────────────────────
+// ─── Step 2: Scrape Paragraphs ─────────────────────────────────────────────────
 async function scrapeParagraphs(url, anchor) {
   console.log(`[SCRAPE] Fetching: ${url}`);
-  return withRetry(async () => {
-    const response = await axios.get(url, {
-      timeout: 20000,
-      maxRedirects: 5,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Connection": "keep-alive",
-      },
+  try {
+    return await withRetry(async () => {
+      const response = await axios.get(url, {
+        timeout: 20000,
+        maxRedirects: 5,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.5",
+          "Connection": "keep-alive",
+        },
+      });
+
+      let $ = cheerio.load(response.data);
+      $ = cleanHtml($);
+
+      const seen = new Set();
+      const scoredParagraphs = [];
+
+      $("p").each((_, el) => {
+        const text = $(el).text().trim();
+        const linkCount = $(el).find("a").length;
+
+        if (text.length < 80) return;
+        if (linkCount > 2) return; // Relaxed: only reject heavily linked
+        if (seen.has(text)) return;
+
+        seen.add(text);
+
+        const score = scoreparagraph(text, anchor);
+        scoredParagraphs.push({ text, score });
+      });
+
+      // Sort by score descending, send top 8 to AI
+      const top = scoredParagraphs
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 8)
+        .map((p) => p.text);
+
+      console.log(`[SCRAPE] ${scoredParagraphs.length} paragraphs found, sending top ${top.length} to AI`);
+      return top;
     });
-
-    const $ = cheerio.load(response.data);
-
-    // Clean up noise
-    $("script, style, noscript").remove();
-
-    const seen = new Set();
-    const scored = [];
-
-    $("p").each((_, el) => {
-      const text = $(el).text().trim();
-      const linkCount = $(el).find("a").length;
-
-      if (text.length < 80) return;
-      if (linkCount > 2) return;   // only reject heavily linked
-      if (seen.has(text)) return;
-
-      const lower = text.toLowerCase();
-      const skipKeywords = [
-        "in conclusion", "in summary", "to summarize",
-        "in this article", "we will cover", "table of contents",
-        "in this guide", "in this post", "in this tutorial",
-      ];
-      if (skipKeywords.some((kw) => lower.startsWith(kw))) return;
-
-      seen.add(text);
-      scored.push({ text, score: scoreParapraph(text, anchor) });
-    });
-
-    // Sort by score and take top 6
-    scored.sort((a, b) => b.score - a.score);
-    const top = scored.slice(0, 6).map((p) => p.text);
-
-    console.log(`[SCRAPE] ${top.length} quality paragraphs selected from ${scored.length} total`);
-    return top;
-  }, 2, 1500);
+  } catch (err) {
+    console.log(`[SCRAPE] Failed for ${url}: ${err.message}`);
+    return [];
+  }
 }
 
-// ─── Step 3: Claude Haiku — Paragraph Selection Only ───────────────────────────
+// ─── Step 3: Claude Haiku — Paragraph Selection Only (LOW COST) ────────────────
 async function analyzeWithAI(paragraphs, anchor, linkto) {
   const paragraphText = paragraphs.map((p, i) => `[${i + 1}] ${p}`).join("\n\n");
   console.log(`[AI] Sending ${paragraphs.length} paragraphs, ${paragraphText.length} chars`);
@@ -226,6 +263,7 @@ app.post("/api/analyze", async (req, res) => {
     return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
   }
 
+  // Cache check
   const cacheKey = getCacheKey(domain, anchor);
   if (cache[cacheKey] && Date.now() - cache[cacheKey].time < CACHE_TTL) {
     console.log(`[CACHE] Hit for ${cacheKey}`);
@@ -246,21 +284,21 @@ app.post("/api/analyze", async (req, res) => {
       return res.status(404).json({ error: "No articles found. Try a different domain or anchor." });
     }
 
+    // Filter own domain
     const filteredUrls = urls.filter((url) => !url.includes(linktoDomain));
 
-    // Step 2: Parallel scraping
+    // Step 2: Parallel scraping with Promise.allSettled
     const scrapeResults = await Promise.allSettled(
-      filteredUrls.map((url) => scrapeParagraphs(url, anchor))
+      filteredUrls.map((url) => scrapeParagraphs(url, anchor).then((paragraphs) => ({ url, paragraphs })))
     );
 
     let allParagraphs = [];
     let articleUrl = "";
 
-    for (let i = 0; i < scrapeResults.length; i++) {
-      const result = scrapeResults[i];
-      if (result.status === "fulfilled" && result.value.length > 0) {
-        allParagraphs = result.value;
-        articleUrl = filteredUrls[i];
+    for (const result of scrapeResults) {
+      if (result.status === "fulfilled" && result.value.paragraphs.length > 0) {
+        allParagraphs = result.value.paragraphs;
+        articleUrl = result.value.url;
         break;
       }
     }
@@ -269,7 +307,7 @@ app.post("/api/analyze", async (req, res) => {
       return res.status(404).json({ error: "No suitable paragraphs found. Try a different anchor or domain." });
     }
 
-    // Step 3: AI
+    // Step 3: AI analysis
     const aiResult = await analyzeWithAI(allParagraphs, anchor, linkto);
 
     const finalResult = {
