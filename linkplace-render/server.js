@@ -45,7 +45,11 @@ function decodeDuckDuckGoUrl(href) {
 
 // ─── Step 1: DuckDuckGo Search (FREE) ──────────────────────────────────────────
 async function searchArticles(domain, anchor) {
+  // FIX 1: anchor is now actually used in queries for topical relevance
+  const anchorTopic = anchor.split(/\s+/).slice(0, 3).join(" ");
   const queries = [
+    `site:${domain} ${anchorTopic}`,
+    `site:${domain} blog ${anchorTopic}`,
     `site:${domain} blog`,
     `site:${domain}`,
   ];
@@ -97,10 +101,9 @@ async function searchArticles(domain, anchor) {
           });
         }
 
-        // Regex fallback on raw HTML
+        // FIX 2: Removed dead `regex` variable, only domainRegex is used
         if (urls.length === 0) {
           const rawHtml = response.data;
-          const regex = /https?:\/\/[^\s"'<>]*domain[^\s"'<>]*/g;
           const domainEscaped = domain.replace(/\./g, "\\.");
           const domainRegex = new RegExp(`https?:\\/\\/[^\\s"'<>]*${domainEscaped}[^\\s"'<>]*`, "g");
           const matches = rawHtml.match(domainRegex) || [];
@@ -135,28 +138,22 @@ function scoreparagraph(text, anchor) {
   const anchorWords = anchor.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
   const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 20);
 
-  // Word count quality
   const wordCount = text.split(/\s+/).length;
   if (wordCount >= 50 && wordCount <= 200) score += 20;
   else if (wordCount >= 30) score += 10;
 
-  // Sentence richness
   if (sentences.length >= 2) score += 15;
   if (sentences.length >= 3) score += 10;
 
-  // Topical overlap with anchor
   const anchorMatchCount = anchorWords.filter((word) => lower.includes(word)).length;
   score += anchorMatchCount * 15;
 
-  // Partial/semantic anchor phrase presence
   const anchorPhrase = anchor.toLowerCase();
   if (lower.includes(anchorPhrase)) score += 30;
 
-  // Readability: no excessive caps, numbers, special chars
   const capsRatio = (text.match(/[A-Z]/g) || []).length / text.length;
   if (capsRatio < 0.15) score += 10;
 
-  // Penalize very short or very long
   if (wordCount < 30) score -= 20;
   if (wordCount > 300) score -= 10;
 
@@ -190,7 +187,7 @@ async function scrapeParagraphs(url, anchor) {
         const linkCount = $(el).find("a").length;
 
         if (text.length < 80) return;
-        if (linkCount > 2) return; // Relaxed: only reject heavily linked
+        if (linkCount > 2) return;
         if (seen.has(text)) return;
 
         seen.add(text);
@@ -199,7 +196,6 @@ async function scrapeParagraphs(url, anchor) {
         scoredParagraphs.push({ text, score });
       });
 
-      // Sort by score descending, send top 8 to AI
       const top = scoredParagraphs
         .sort((a, b) => b.score - a.score)
         .slice(0, 8)
@@ -263,7 +259,6 @@ app.post("/api/analyze", async (req, res) => {
     return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
   }
 
-  // Cache check
   const cacheKey = getCacheKey(domain, anchor);
   if (cache[cacheKey] && Date.now() - cache[cacheKey].time < CACHE_TTL) {
     console.log(`[CACHE] Hit for ${cacheKey}`);
@@ -278,16 +273,13 @@ app.post("/api/analyze", async (req, res) => {
   }
 
   try {
-    // Step 1: Search
     const urls = await searchArticles(domain, anchor);
     if (!urls.length) {
       return res.status(404).json({ error: "No articles found. Try a different domain or anchor." });
     }
 
-    // Filter own domain
     const filteredUrls = urls.filter((url) => !url.includes(linktoDomain));
 
-    // Step 2: Parallel scraping with Promise.allSettled
     const scrapeResults = await Promise.allSettled(
       filteredUrls.map((url) => scrapeParagraphs(url, anchor).then((paragraphs) => ({ url, paragraphs })))
     );
@@ -307,7 +299,6 @@ app.post("/api/analyze", async (req, res) => {
       return res.status(404).json({ error: "No suitable paragraphs found. Try a different anchor or domain." });
     }
 
-    // Step 3: AI analysis
     const aiResult = await analyzeWithAI(allParagraphs, anchor, linkto);
 
     const finalResult = {
