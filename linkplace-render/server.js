@@ -28,13 +28,32 @@ async function withRetry(fn, maxAttempts = 2, delay = 1000) {
   }
 }
 
+// ─── Skip non-article pages ────────────────────────────────────────────────────
+const SKIP_PATH_KEYWORDS = [
+  "/pricing", "/about", "/contact", "/login", "/signup", "/register",
+  "/cart", "/checkout", "/account", "/terms", "/privacy", "/faq",
+  "/support", "/demo", "/features", "/product", "/plans", "/free-trial",
+  "/alternatives", "/blacklist", "/404",
+];
+
+function isArticleUrl(url) {
+  try {
+    const urlPath = new URL(url).pathname;
+    if (urlPath === "/" || urlPath === "") return false;
+    if (SKIP_PATH_KEYWORDS.some((kw) => urlPath.toLowerCase().startsWith(kw))) return false;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 // ─── Step 1: SerpAPI Google Search ────────────────────────────────────────────
 async function searchArticles(domain, anchor) {
   const queries = [
-    `site:${domain} "${anchor}"`,
+    `site:${domain} ${anchor} article`,
+    `site:${domain} ${anchor} guide`,
     `site:${domain} ${anchor}`,
-    `site:${domain} blog ${anchor}`,
-    `site:${domain}`,
+    `site:${domain} blog`,
   ];
 
   for (const query of queries) {
@@ -55,10 +74,10 @@ async function searchArticles(domain, anchor) {
       const results = response.data?.organic_results || [];
       const urls = results
         .map((r) => r.link)
-        .filter((url) => url && url.includes(domain))
+        .filter((url) => url && url.includes(domain) && isArticleUrl(url))
         .slice(0, 5);
 
-      console.log(`[SEARCH] Found ${urls.length} URLs: ${urls.join(", ")}`);
+      console.log(`[SEARCH] Found ${urls.length} article URLs: ${urls.join(", ")}`);
       if (urls.length > 0) return urls;
     } catch (err) {
       console.log(`[SEARCH] Query failed: ${err.message}`);
@@ -183,7 +202,7 @@ Rules: positive tone only, natural fit, minimal edit, use [[ANCHOR]] placeholder
 
 ${paragraphText}
 
-Return ONLY this JSON:
+Return ONLY this JSON, no markdown, no backticks:
 {"paragraph":"exact paragraph text","suggested_sentence":"original sentence being edited","suggested_edit":"edited sentence with [[ANCHOR]]","reason":"1 sentence why this is best spot","relevance_score":80}`;
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -208,7 +227,8 @@ Return ONLY this JSON:
   const text = (data.content || []).map((i) => (i.type === "text" ? i.text : "")).join("");
   console.log(`[AI] Raw response: ${text}`);
 
-  const match = text.match(/\{[\s\S]*\}/);
+  const cleaned = text.replace(/```json|```/g, "").trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("Could not parse AI response");
 
   return JSON.parse(match[0]);
