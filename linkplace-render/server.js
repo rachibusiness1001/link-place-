@@ -11,7 +11,6 @@ app.use(express.static(path.join(__dirname, "public")));
 const cache = {};
 const CACHE_TTL = 60 * 60 * 1000;
 
-// FIX 8: Cache key now includes linkto
 function getCacheKey(domain, anchor, linkto) {
   return `${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}`;
 }
@@ -29,9 +28,8 @@ async function withRetry(fn, maxAttempts = 2, delay = 1000) {
   }
 }
 
-// ─── Step 1: SerpApi Google Search ────────────────────────────────────────────
+// ─── Step 1: SerpAPI Google Search ────────────────────────────────────────────
 async function searchArticles(domain, anchor) {
-  // FIX 2: Exact match support with quoted anchor
   const queries = [
     `site:${domain} "${anchor}"`,
     `site:${domain} ${anchor}`,
@@ -76,7 +74,7 @@ function cleanHtml($) {
   return $;
 }
 
-// ─── FIX 3: Detect Cloudflare / Bot Protection ────────────────────────────────
+// ─── Cloudflare Detection ──────────────────────────────────────────────────────
 function isBlockedPage(html) {
   const lower = html.toLowerCase();
   return (
@@ -89,15 +87,14 @@ function isBlockedPage(html) {
   );
 }
 
-// ─── Lightweight Semantic Scoring ─────────────────────────────────────────────
+// ─── Semantic Scorer ──────────────────────────────────────────────────────────
 function scoreParagraph(text, anchor) {
   let score = 0;
   const lower = text.toLowerCase();
-  // FIX 1: Allow shorter technical words like ai, llm, 403
   const anchorWords = anchor.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
   const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 20);
-
   const wordCount = text.split(/\s+/).length;
+
   if (wordCount >= 50 && wordCount <= 200) score += 20;
   else if (wordCount >= 30) score += 10;
 
@@ -107,11 +104,9 @@ function scoreParagraph(text, anchor) {
   const anchorMatchCount = anchorWords.filter((word) => lower.includes(word)).length;
   score += anchorMatchCount * 15;
 
-  const anchorPhrase = anchor.toLowerCase();
-  if (lower.includes(anchorPhrase)) score += 30;
+  if (lower.includes(anchor.toLowerCase())) score += 30;
 
-  // FIX 1: Bonus for partial technical phrase match
-  const anchorParts = anchorPhrase.split(/\s+/);
+  const anchorParts = anchor.toLowerCase().split(/\s+/);
   const partialMatch = anchorParts.filter((w) => w.length > 2 && lower.includes(w)).length;
   if (partialMatch >= Math.ceil(anchorParts.length / 2)) score += 15;
 
@@ -140,9 +135,8 @@ async function scrapeParagraphs(url, anchor) {
         },
       });
 
-      // FIX 3: Detect and skip blocked pages
       if (isBlockedPage(response.data)) {
-        console.log(`[SCRAPE] Blocked page detected (Cloudflare/bot protection): ${url}`);
+        console.log(`[SCRAPE] Blocked page detected: ${url}`);
         return [];
       }
 
@@ -161,20 +155,16 @@ async function scrapeParagraphs(url, anchor) {
         if (seen.has(text)) return;
 
         seen.add(text);
-
-        const score = scoreParagraph(text, anchor);
-        scoredParagraphs.push({ text, score });
+        scoredParagraphs.push({ text, score: scoreParagraph(text, anchor) });
       });
 
-      // FIX 4: Filter weak paragraphs before sending to AI
-      // FIX 5: Trim long paragraphs to reduce token usage
       const top = scoredParagraphs
         .filter((p) => p.score > 15)
         .sort((a, b) => b.score - a.score)
         .slice(0, 8)
         .map((p) => p.text.slice(0, 1200));
 
-      console.log(`[SCRAPE] ${scoredParagraphs.length} total, ${top.length} quality paragraphs sending to AI`);
+      console.log(`[SCRAPE] ${scoredParagraphs.length} total, ${top.length} quality paragraphs`);
       return top;
     });
   } catch (err) {
@@ -183,7 +173,7 @@ async function scrapeParagraphs(url, anchor) {
   }
 }
 
-// ─── Step 3: Claude Haiku — Paragraph Selection Only ──────────────────────────
+// ─── Step 3: Claude Haiku ──────────────────────────────────────────────────────
 async function analyzeWithAI(paragraphs, anchor, linkto) {
   const paragraphText = paragraphs.map((p, i) => `[${i + 1}] ${p}`).join("\n\n");
   console.log(`[AI] Sending ${paragraphs.length} paragraphs, ${paragraphText.length} chars`);
@@ -193,9 +183,9 @@ Rules: positive tone only, natural fit, minimal edit, use [[ANCHOR]] placeholder
 
 ${paragraphText}
 
-Return ONLY JSON: {"paragraph":"","suggested_edit":"","relevance_score":0}`;
+Return ONLY this JSON:
+{"paragraph":"exact paragraph text","suggested_sentence":"original sentence being edited","suggested_edit":"edited sentence with [[ANCHOR]]","reason":"1 sentence why this is best spot","relevance_score":80}`;
 
-  // FIX 7: AbortSignal timeout to prevent hanging requests
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -203,12 +193,10 @@ Return ONLY JSON: {"paragraph":"","suggested_edit":"","relevance_score":0}`;
       "x-api-key": process.env.ANTHROPIC_API_KEY,
       "anthropic-version": "2023-06-01",
     },
-    // FIX 7
     signal: AbortSignal.timeout(30000),
     body: JSON.stringify({
-model: "claude-haiku-4-5-20251001",
-      max_tokens: 200,
-      // FIX 6: Stable temperature for consistent JSON output
+      model: "claude-3-haiku-20240307",
+      max_tokens: 400,
       temperature: 0.2,
       messages: [{ role: "user", content: prompt }],
     }),
@@ -240,7 +228,6 @@ app.post("/api/analyze", async (req, res) => {
     return res.status(500).json({ error: "SERPAPI_KEY not configured" });
   }
 
-  // FIX 8: Cache key includes linkto
   const cacheKey = getCacheKey(domain, anchor, linkto);
   if (cache[cacheKey] && Date.now() - cache[cacheKey].time < CACHE_TTL) {
     console.log(`[CACHE] Hit for ${cacheKey}`);
@@ -288,7 +275,9 @@ app.post("/api/analyze", async (req, res) => {
     const finalResult = {
       article_url: articleUrl,
       paragraph: aiResult.paragraph,
+      suggested_sentence: aiResult.suggested_sentence || null,
       suggested_edit: aiResult.suggested_edit,
+      reason: aiResult.reason || "",
       relevance_score: aiResult.relevance_score,
       natural_fit: aiResult.relevance_score >= 80 ? "high" : aiResult.relevance_score >= 60 ? "medium" : "low",
       cached: false,
