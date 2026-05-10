@@ -28,29 +28,12 @@ async function withRetry(fn, maxAttempts = 2, delay = 1000) {
   }
 }
 
-// ─── Decode DuckDuckGo Redirect URLs ──────────────────────────────────────────
-function decodeDuckDuckGoUrl(href) {
-  if (!href) return null;
-  try {
-    if (href.includes("uddg=")) {
-      const match = href.match(/uddg=([^&]+)/);
-      if (match) return decodeURIComponent(match[1]);
-    }
-    if (href.startsWith("http")) return href;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-// ─── Step 1: DuckDuckGo Search (FREE) ──────────────────────────────────────────
+// ─── Step 1: Google Search (Reliable) ─────────────────────────────────────────
 async function searchArticles(domain, anchor) {
-  // FIX 1: anchor is now actually used in queries for topical relevance
   const anchorTopic = anchor.split(/\s+/).slice(0, 3).join(" ");
   const queries = [
     `site:${domain} ${anchorTopic}`,
     `site:${domain} blog ${anchorTopic}`,
-    `site:${domain} blog`,
     `site:${domain}`,
   ];
 
@@ -58,16 +41,13 @@ async function searchArticles(domain, anchor) {
     console.log(`[SEARCH] Query: ${query}`);
     try {
       const urls = await withRetry(async () => {
-        const response = await axios.post(
-          "https://html.duckduckgo.com/html/",
-          `q=${encodeURIComponent(query)}`,
+        const response = await axios.get(
+          `https://www.google.com/search?q=${encodeURIComponent(query)}&num=10`,
           {
             headers: {
               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-              "Content-Type": "application/x-www-form-urlencoded",
               "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
               "Accept-Language": "en-US,en;q=0.5",
-              "Referer": "https://duckduckgo.com/",
             },
             timeout: 20000,
             maxRedirects: 5,
@@ -77,46 +57,28 @@ async function searchArticles(domain, anchor) {
         const $ = cheerio.load(response.data);
         const urls = [];
 
-        // Multiple selectors with fallback
-        const selectors = ["a.result__a", ".result__title a", "h2.result__title a", ".results .result a"];
-        for (const selector of selectors) {
-          $(selector).each((_, el) => {
-            const href = $(el).attr("href");
-            const decoded = decodeDuckDuckGoUrl(href);
-            if (decoded && decoded.includes(domain)) {
-              urls.push(decoded);
+        $("a").each((_, el) => {
+          const href = $(el).attr("href");
+          if (href && href.startsWith("/url?q=")) {
+            const real = decodeURIComponent(
+              href.replace("/url?q=", "").split("&")[0]
+            );
+            if (
+              real.includes(domain) &&
+              real.startsWith("http") &&
+              !real.includes("google.com")
+            ) {
+              urls.push(real);
             }
-          });
-          if (urls.length > 0) break;
-        }
+          }
+        });
 
-        // Fallback: result__url text
-        if (urls.length === 0) {
-          $(".result__url").each((_, el) => {
-            let url = $(el).text().trim();
-            if (url && url.includes(domain)) {
-              if (!url.startsWith("http")) url = "https://" + url;
-              urls.push(url);
-            }
-          });
-        }
-
-        // FIX 2: Removed dead `regex` variable, only domainRegex is used
-        if (urls.length === 0) {
-          const rawHtml = response.data;
-          const domainEscaped = domain.replace(/\./g, "\\.");
-          const domainRegex = new RegExp(`https?:\\/\\/[^\\s"'<>]*${domainEscaped}[^\\s"'<>]*`, "g");
-          const matches = rawHtml.match(domainRegex) || [];
-          urls.push(...matches.map((u) => decodeURIComponent(u)));
-        }
-
-        return [...new Set(urls)].slice(0, 5);
+        const unique = [...new Set(urls)].slice(0, 5);
+        console.log(`[SEARCH] Found ${unique.length} URLs: ${unique.join(", ")}`);
+        return unique;
       });
 
-      if (urls.length > 0) {
-        console.log(`[SEARCH] Found ${urls.length} URLs: ${urls.join(", ")}`);
-        return urls;
-      }
+      if (urls.length > 0) return urls;
     } catch (err) {
       console.log(`[SEARCH] Query failed: ${err.message}`);
     }
@@ -132,7 +94,7 @@ function cleanHtml($) {
 }
 
 // ─── Lightweight Semantic Scoring ─────────────────────────────────────────────
-function scoreparagraph(text, anchor) {
+function scoreParagraph(text, anchor) {
   let score = 0;
   const lower = text.toLowerCase();
   const anchorWords = anchor.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
@@ -192,7 +154,7 @@ async function scrapeParagraphs(url, anchor) {
 
         seen.add(text);
 
-        const score = scoreparagraph(text, anchor);
+        const score = scoreParagraph(text, anchor);
         scoredParagraphs.push({ text, score });
       });
 
@@ -210,7 +172,7 @@ async function scrapeParagraphs(url, anchor) {
   }
 }
 
-// ─── Step 3: Claude Haiku — Paragraph Selection Only (LOW COST) ────────────────
+// ─── Step 3: Claude Haiku — Paragraph Selection Only ──────────────────────────
 async function analyzeWithAI(paragraphs, anchor, linkto) {
   const paragraphText = paragraphs.map((p, i) => `[${i + 1}] ${p}`).join("\n\n");
   console.log(`[AI] Sending ${paragraphs.length} paragraphs, ${paragraphText.length} chars`);
@@ -248,7 +210,7 @@ Return ONLY JSON: {"paragraph":"","suggested_edit":"","relevance_score":0}`;
   return JSON.parse(match[0]);
 }
 
-// ─── Main API Route ─────────────────────────────────────────────────────────────
+// ─── Main API Route ────────────────────────────────────────────────────────────
 app.post("/api/analyze", async (req, res) => {
   const { domain, anchor, linkto } = req.body;
 
@@ -281,7 +243,9 @@ app.post("/api/analyze", async (req, res) => {
     const filteredUrls = urls.filter((url) => !url.includes(linktoDomain));
 
     const scrapeResults = await Promise.allSettled(
-      filteredUrls.map((url) => scrapeParagraphs(url, anchor).then((paragraphs) => ({ url, paragraphs })))
+      filteredUrls.map((url) =>
+        scrapeParagraphs(url, anchor).then((paragraphs) => ({ url, paragraphs }))
+      )
     );
 
     let allParagraphs = [];
