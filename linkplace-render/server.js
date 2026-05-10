@@ -15,21 +15,50 @@ function getCacheKey(domain, anchor) {
   return `${domain}::${anchor.toLowerCase().trim()}`;
 }
 
+// ─── Retry Helper ──────────────────────────────────────────────────────────────
+async function withRetry(fn, retries = 2, delay = 1000) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i === retries) throw err;
+      console.log(`[RETRY] Attempt ${i + 1} failed: ${err.message}. Retrying...`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+
+// ─── Decode DuckDuckGo Redirect URLs ──────────────────────────────────────────
+function decodeDDGUrl(href) {
+  if (!href) return null;
+  if (href.includes("uddg=")) {
+    try {
+      const url = new URL("https://duckduckgo.com" + href);
+      const uddg = url.searchParams.get("uddg");
+      if (uddg) return decodeURIComponent(uddg);
+    } catch (e) {}
+  }
+  if (href.startsWith("http")) return href;
+  return null;
+}
+
 // ─── Step 1: DuckDuckGo Search (FREE) ──────────────────────────────────────────
 async function searchArticles(domain, anchor) {
-  const query = `site:${domain} ${anchor}`;
+  // Broad query — not exact anchor match
+  const query = `site:${domain} blog`;
   console.log(`[SEARCH] Query: ${query}`);
 
-  try {
+  return withRetry(async () => {
     const response = await axios.post(
       "https://html.duckduckgo.com/html/",
-      `q=${encodeURIComponent(query)}`,
+      `q=${encodeURIComponent(query)}&b=&kl=&df=`,
       {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           "Content-Type": "application/x-www-form-urlencoded",
           "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "Accept-Language": "en-US,en;q=0.5",
+          "Origin": "https://duckduckgo.com",
           "Referer": "https://duckduckgo.com/",
         },
         timeout: 20000,
@@ -40,87 +69,115 @@ async function searchArticles(domain, anchor) {
     const $ = cheerio.load(response.data);
     const urls = [];
 
-    $("a.result__a").each((_, el) => {
-      const href = $(el).attr("href");
-      if (href && href.includes(domain)) {
-        urls.push(href);
-      }
-    });
-
-    // Fallback: try result__url
-    if (urls.length === 0) {
-      $(".result__url").each((_, el) => {
-        let url = $(el).text().trim();
-        if (url && url.includes(domain)) {
-          if (!url.startsWith("http")) url = "https://" + url;
-          urls.push(url);
-        }
+    // Primary selectors
+    const selectors = ["a.result__a", ".result__a", "a.result-link", ".result h2 a", "h2 a"];
+    for (const selector of selectors) {
+      $(selector).each((_, el) => {
+        const decoded = decodeDDGUrl($(el).attr("href"));
+        if (decoded && decoded.includes(domain)) urls.push(decoded);
       });
+      if (urls.length > 0) break;
+    }
+
+    // Fallback: all links
+    if (urls.length === 0) {
+      $("a").each((_, el) => {
+        const decoded = decodeDDGUrl($(el).attr("href"));
+        if (decoded && decoded.includes(domain)) urls.push(decoded);
+      });
+    }
+
+    // Regex fallback
+    if (urls.length === 0) {
+      const regex = new RegExp(`https?://[\\w./%-]*${domain.replace(".", "\\.")}[\\w./%-]*`, "g");
+      const matches = response.data.match(regex) || [];
+      urls.push(...matches);
     }
 
     const unique = [...new Set(urls)].slice(0, 3);
     console.log(`[SEARCH] Found ${unique.length} URLs: ${unique.join(", ")}`);
     return unique;
-  } catch (err) {
-    console.log(`[SEARCH] DuckDuckGo failed: ${err.message}`);
-    return [];
-  }
+  });
+}
+
+// ─── Lightweight Semantic Scorer ───────────────────────────────────────────────
+function scoreParapraph(text, anchor) {
+  let score = 0;
+  const lower = text.toLowerCase();
+  const anchorWords = anchor.toLowerCase().split(" ").filter((w) => w.length > 3);
+
+  // Topical overlap
+  anchorWords.forEach((word) => {
+    if (lower.includes(word)) score += 10;
+  });
+
+  // Sentence richness — longer paragraphs score higher
+  if (text.length > 200) score += 5;
+  if (text.length > 350) score += 5;
+
+  // Readability — not too many special chars
+  const specialChars = (text.match(/[^a-zA-Z0-9\s.,!?]/g) || []).length;
+  if (specialChars < 10) score += 3;
+
+  // Penalize if starts with list-like patterns
+  if (/^[\d\-\*\•]/.test(text.trim())) score -= 5;
+
+  return score;
 }
 
 // ─── Step 2: Scrape Paragraphs (NO AI) ─────────────────────────────────────────
 async function scrapeParagraphs(url, anchor) {
   console.log(`[SCRAPE] Fetching: ${url}`);
-  try {
+  return withRetry(async () => {
     const response = await axios.get(url, {
       timeout: 20000,
       maxRedirects: 5,
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
         "Connection": "keep-alive",
       },
     });
 
     const $ = cheerio.load(response.data);
+
+    // Clean up noise
+    $("script, style, noscript").remove();
+
     const seen = new Set();
-    const paragraphs = [];
+    const scored = [];
 
     $("p").each((_, el) => {
       const text = $(el).text().trim();
-      const hasLink = $(el).find("a").length > 0;
+      const linkCount = $(el).find("a").length;
 
       if (text.length < 80) return;
-      if (hasLink) return;
+      if (linkCount > 2) return;   // only reject heavily linked
       if (seen.has(text)) return;
 
       const lower = text.toLowerCase();
       const skipKeywords = [
         "in conclusion", "in summary", "to summarize",
         "in this article", "we will cover", "table of contents",
-        "in this guide", "in this post", "in this tutorial"
+        "in this guide", "in this post", "in this tutorial",
       ];
       if (skipKeywords.some((kw) => lower.startsWith(kw))) return;
 
-      // Relevance check
-      const anchorWords = anchor.toLowerCase().split(" ");
-      const hasRelevance = anchorWords.some((word) => word.length > 3 && lower.includes(word));
-      if (!hasRelevance) return;
-
       seen.add(text);
-      paragraphs.push(text);
+      scored.push({ text, score: scoreParapraph(text, anchor) });
     });
 
-    const limited = paragraphs.slice(0, 8);
-    console.log(`[SCRAPE] ${limited.length} valid paragraphs found`);
-    return limited;
-  } catch (err) {
-    console.log(`[SCRAPE] Failed for ${url}: ${err.message}`);
-    return [];
-  }
+    // Sort by score and take top 6
+    scored.sort((a, b) => b.score - a.score);
+    const top = scored.slice(0, 6).map((p) => p.text);
+
+    console.log(`[SCRAPE] ${top.length} quality paragraphs selected from ${scored.length} total`);
+    return top;
+  }, 2, 1500);
 }
 
-// ─── Step 3: Claude Haiku — Paragraph Selection Only (LOW COST) ────────────────
+// ─── Step 3: Claude Haiku — Paragraph Selection Only ───────────────────────────
 async function analyzeWithAI(paragraphs, anchor, linkto) {
   const paragraphText = paragraphs.map((p, i) => `[${i + 1}] ${p}`).join("\n\n");
   console.log(`[AI] Sending ${paragraphs.length} paragraphs, ${paragraphText.length} chars`);
@@ -169,7 +226,6 @@ app.post("/api/analyze", async (req, res) => {
     return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
   }
 
-  // Cache check
   const cacheKey = getCacheKey(domain, anchor);
   if (cache[cacheKey] && Date.now() - cache[cacheKey].time < CACHE_TTL) {
     console.log(`[CACHE] Hit for ${cacheKey}`);
@@ -190,18 +246,21 @@ app.post("/api/analyze", async (req, res) => {
       return res.status(404).json({ error: "No articles found. Try a different domain or anchor." });
     }
 
-    // Filter own domain
     const filteredUrls = urls.filter((url) => !url.includes(linktoDomain));
 
-    // Step 2: Scrape
+    // Step 2: Parallel scraping
+    const scrapeResults = await Promise.allSettled(
+      filteredUrls.map((url) => scrapeParagraphs(url, anchor))
+    );
+
     let allParagraphs = [];
     let articleUrl = "";
 
-    for (const url of filteredUrls) {
-      const paragraphs = await scrapeParagraphs(url, anchor);
-      if (paragraphs.length > 0) {
-        allParagraphs = paragraphs;
-        articleUrl = url;
+    for (let i = 0; i < scrapeResults.length; i++) {
+      const result = scrapeResults[i];
+      if (result.status === "fulfilled" && result.value.length > 0) {
+        allParagraphs = result.value;
+        articleUrl = filteredUrls[i];
         break;
       }
     }
@@ -210,7 +269,7 @@ app.post("/api/analyze", async (req, res) => {
       return res.status(404).json({ error: "No suitable paragraphs found. Try a different anchor or domain." });
     }
 
-    // Step 3: AI analysis
+    // Step 3: AI
     const aiResult = await analyzeWithAI(allParagraphs, anchor, linkto);
 
     const finalResult = {
