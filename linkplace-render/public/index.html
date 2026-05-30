@@ -787,9 +787,12 @@ async function runAnalysis(isRegenerate = false) {
     const suggestions = result.suggestions || [];
     if (!suggestions.length) throw new Error('No suggestions returned. Try again.');
 
-    // Track these paragraphs as excluded for future regenerate
+    // Track these paragraphs as excluded for future regenerate — store first 120 chars as key
     for (const s of suggestions) {
-      if (s.paragraph) _excludedParagraphs.push(s.paragraph.slice(0, 80));
+      if (s.paragraph) {
+        const key = s.paragraph.slice(0, 120);
+        if (!_excludedParagraphs.includes(key)) _excludedParagraphs.push(key);
+      }
     }
 
     suggestions.forEach((s, i) => renderSuggestion(s, i, anchor));
