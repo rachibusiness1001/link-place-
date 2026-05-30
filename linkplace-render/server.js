@@ -51,6 +51,14 @@ const SKIP_PREFIXES = [
   "/sitemap", "/feed", "/rss", "/amp/",
 ];
 
+// Blog path indicators — URL must contain one of these to qualify
+const BLOG_PATH_INDICATORS = [
+  "/blog/", "/blogs/", "/post/", "/posts/", "/article/", "/articles/",
+  "/news/", "/insights/", "/resources/", "/learn/", "/guide/", "/guides/",
+  "/journal/", "/editorial/", "/content/", "/stories/", "/story/",
+  "/tips/", "/advice/", "/howto/", "/how-to/", "/tutorial/", "/tutorials/",
+];
+
 function isArticleUrl(url) {
   try {
     const parsed = new URL(url);
@@ -63,6 +71,10 @@ function isArticleUrl(url) {
     const meaningful = segments.filter((s) => !INDEX_SEGMENTS.has(s.toLowerCase()));
     if (meaningful.length === 0) return false;
     if (/^\d{4}$/.test(segments[segments.length - 1])) return false;
+    // Must be a blog/article path — not a landing page
+    const lowerPath = urlPath.toLowerCase();
+    const isBlogPath = BLOG_PATH_INDICATORS.some((indicator) => lowerPath.includes(indicator));
+    if (!isBlogPath) return false;
     return true;
   } catch { return false; }
 }
@@ -139,7 +151,48 @@ Rules:
   }
 }
 
-function isBlockedPage(html, statusCode) {
+// ─── Extract topic/type from linkto URL ──────────────────────────────────────
+async function analyzeLinktoPage(linkto) {
+  console.log(`[LINKTO] Analyzing destination URL: ${linkto}`);
+  try {
+    const { html, status } = await fetchWithRetry(linkto, 1, 10000);
+    if (isBlockedPage(html, status)) {
+      console.log(`[LINKTO] Blocked, using URL slug only`);
+      return extractLinktoFromSlug(linkto);
+    }
+    const article = extractArticleContent(html, linkto);
+    if (!article) return extractLinktoFromSlug(linkto);
+
+    // Get first 1500 chars of content for topic detection
+    const snippet = article.textContent.slice(0, 1500).replace(/\s+/g, " ").trim();
+    const title = article.title || "";
+
+    // Check if it's a tool/product page
+    const toolIndicators = [
+      /\b(free trial|start free|get started|sign up|pricing|plans?|features?)\b/i,
+      /\b(dashboard|login|register|download|install|api key)\b/i,
+      /\b(software|platform|saas|tool|app)\b/i,
+    ];
+    const isToolPage = toolIndicators.some((re) => re.test(snippet) || re.test(title));
+
+    console.log(`[LINKTO] title="${title.slice(0, 60)}", isToolPage=${isToolPage}`);
+    return { title, snippet, isToolPage, keywords: extractKeywordsLocal(title + " " + snippet).slice(0, 15) };
+  } catch (err) {
+    console.log(`[LINKTO] Fetch failed: ${err.message}`);
+    return extractLinktoFromSlug(linkto);
+  }
+}
+
+function extractLinktoFromSlug(linkto) {
+  try {
+    const slug = new URL(linkto).pathname.replace(/\//g, " ").replace(/-/g, " ").trim();
+    const toolIndicators = [/\b(tool|software|platform|app|saas)\b/i];
+    const isToolPage = toolIndicators.some((re) => re.test(slug));
+    return { title: slug, snippet: slug, isToolPage, keywords: extractKeywordsLocal(slug).slice(0, 10) };
+  } catch { return { title: "", snippet: "", isToolPage: false, keywords: [] }; }
+}
+
+
   if (statusCode === 403 || statusCode === 429) return true;
   const lower = html.toLowerCase();
   return (
@@ -181,10 +234,10 @@ async function searchArticles(domain, anchor, keywords) {
   const topKeywords = keywords.slice(0, 6).join(" ");
   const phrase = anchor.toLowerCase().trim();
   const queries = [
-    `site:${domain} "${phrase}"`,
-    `site:${domain} ${topKeywords}`,
+    `site:${domain} inurl:blog "${phrase}"`,
     `site:${domain} inurl:blog ${topKeywords}`,
-    `site:${domain}`,
+    `site:${domain} inurl:article ${topKeywords}`,
+    `site:${domain} inurl:blog`,
   ];
 
   const allUrls = new Set();
@@ -260,7 +313,7 @@ const NOISE_PATTERNS = [
 
 function isQualityParagraph(text, linkCount) {
   if (text.length < 120) return false;
-  if (linkCount > 3) return false;
+  if (linkCount > 0) return false; // Skip paragraphs that already have any link
   for (const pattern of NOISE_PATTERNS) { if (pattern.test(text)) return false; }
   const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 20);
   if (sentences.length < 2) return false;
@@ -354,27 +407,56 @@ function findBestUrlMatch(aiParagraph, allScoredParagraphs, fallbackUrl) {
   return fallbackUrl;
 }
 
-async function analyzeWithAI(paragraphs, anchor, linkto) {
-  const paragraphText = paragraphs.map((p, i) => `[${i + 1}]\n${p.text.slice(0, 1000)}`).join("\n\n---\n\n");
+async function analyzeWithAI(paragraphs, anchor, linkto, linktoInfo, excludedParagraphs = []) {
+  // Filter out excluded paragraphs (already shown to user)
+  const available = paragraphs.filter((p) => !excludedParagraphs.includes(p.text.slice(0, 80)));
+
+  // If linkto is a tool page, skip paragraphs that already mention a tool
+  const filtered = linktoInfo?.isToolPage
+    ? available.filter((p) => !mentionstool(p.text))
+    : available;
+
+  const pool = (filtered.length >= 4 ? filtered : available).slice(0, 10);
+
+  const paragraphText = pool.map((p, i) => `[${i + 1}]\n${p.text.slice(0, 1000)}`).join("\n\n---\n\n");
+
+  const linktoBrief = linktoInfo?.title
+    ? `Destination page topic: "${linktoInfo.title.slice(0, 100)}"`
+    : `Destination URL: ${linkto}`;
+
   const systemPrompt = `You are a senior SEO editor placing contextual internal links in blog articles. Your placements must read as if written by the original author. Never force links. Respond ONLY with valid JSON. No markdown, no backticks, no explanation outside JSON.`;
+
   const userPrompt = `Anchor text to place: "${anchor}"
-Link destination: ${linkto}
-Pick the SINGLE best paragraph where inserting the anchor link feels completely natural.
+${linktoBrief}
+Pick the TWO best paragraphs where inserting the anchor link feels completely natural.
 Rules:
-- Choose paragraph where topic MOST directly relates to the anchor text concept
-- Edit ONLY one sentence — use [[ANCHOR]] placeholder
+- Choose paragraphs where topic MOST directly relates to the anchor text AND destination page topic
+- Edit ONLY one sentence per paragraph — use [[ANCHOR]] placeholder
 - Do NOT rewrite the paragraph
+- Suggestions must be from DIFFERENT paragraphs
 - If no paragraph is truly relevant, set relevance_score below 50
 Paragraphs:
 ${paragraphText}
-Return this exact JSON:
+Return this exact JSON with two suggestions:
 {
-  "paragraph": "full original paragraph text here",
-  "suggested_sentence": "original sentence before edit",
-  "suggested_edit": "edited sentence with [[ANCHOR]] placed naturally",
-  "reason": "one sentence explaining why",
-  "relevance_score": 85,
-  "naturalness_score": 90
+  "suggestions": [
+    {
+      "paragraph": "full original paragraph text here",
+      "suggested_sentence": "original sentence before edit",
+      "suggested_edit": "edited sentence with [[ANCHOR]] placed naturally",
+      "reason": "one sentence explaining why",
+      "relevance_score": 85,
+      "naturalness_score": 90
+    },
+    {
+      "paragraph": "full original paragraph text here",
+      "suggested_sentence": "original sentence before edit",
+      "suggested_edit": "edited sentence with [[ANCHOR]] placed naturally",
+      "reason": "one sentence explaining why",
+      "relevance_score": 78,
+      "naturalness_score": 82
+    }
+  ]
 }`;
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -383,7 +465,7 @@ Return this exact JSON:
     signal: AbortSignal.timeout(30000),
     body: JSON.stringify({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 600,
+      max_tokens: 1200,
       temperature: 0.1,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],
@@ -396,10 +478,25 @@ Return this exact JSON:
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error("AI response was not valid JSON");
   const parsed = JSON.parse(jsonMatch[0]);
-  for (const field of ["paragraph", "suggested_edit", "relevance_score"]) {
-    if (!parsed[field]) throw new Error(`AI response missing required field: ${field}`);
+  if (!parsed.suggestions || !Array.isArray(parsed.suggestions) || parsed.suggestions.length === 0) {
+    throw new Error("AI response missing suggestions array");
   }
-  return parsed;
+  for (const s of parsed.suggestions) {
+    for (const field of ["paragraph", "suggested_edit", "relevance_score"]) {
+      if (!s[field]) throw new Error(`AI response missing required field: ${field}`);
+    }
+  }
+  return parsed.suggestions;
+}
+
+function mentionstool(text) {
+  // Check if paragraph already mentions a competing tool/software
+  const toolPatterns = [
+    /\b(using|use|with|via|through|powered by|built (on|with)|integrate[sd]? with)\b.{0,40}\b(tool|software|platform|app|service|api)\b/i,
+    /\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s(?:tool|software|platform|app)\b/,
+    /\b(monday\.com|hubspot|salesforce|zapier|ahrefs|semrush|moz|screaming frog|google analytics|mixpanel|amplitude)\b/i,
+  ];
+  return toolPatterns.some((re) => re.test(text));
 }
 
 async function scrapeAndScore(url, anchor, keywords) {
@@ -426,14 +523,21 @@ async function scrapeAndScore(url, anchor, keywords) {
   }
 }
 
-async function runAnalysis(domain, anchor, linkto) {
-  console.log(`[ANALYZE] domain=${domain}, anchor="${anchor}"`);
+async function runAnalysis(domain, anchor, linkto, excludedParagraphs = []) {
+  console.log(`[ANALYZE] domain=${domain}, anchor="${anchor}", excluded=${excludedParagraphs.length}`);
 
-  // STEP 1: AI keyword generation
-  const keywords = await generateKeywordsWithAI(anchor, linkto);
+  // STEP 1: AI keyword generation + linkto page analysis (parallel)
+  const [keywords, linktoInfo] = await Promise.all([
+    generateKeywordsWithAI(anchor, linkto),
+    analyzeLinktoPage(linkto),
+  ]);
+  console.log(`[LINKTO] isToolPage=${linktoInfo.isToolPage}, keywords=${linktoInfo.keywords.slice(0, 5).join(", ")}`);
+
+  // Merge linkto keywords into search keywords for better targeting
+  const mergedKeywords = [...new Set([...keywords, ...linktoInfo.keywords])];
 
   // STEP 2: Search with AI keywords
-  const urls = await searchArticles(domain, anchor, keywords);
+  const urls = await searchArticles(domain, anchor, mergedKeywords);
   if (!urls.length) throw new Error("No articles found. Try a different domain or anchor text.");
 
   let linktoDomain = "";
@@ -442,7 +546,7 @@ async function runAnalysis(domain, anchor, linkto) {
   if (!filteredUrls.length) throw new Error("All found URLs belong to the linkto domain.");
 
   // STEP 3: Parallel scrape
-  const scrapeResults = await Promise.allSettled(filteredUrls.map((url) => scrapeAndScore(url, anchor, keywords)));
+  const scrapeResults = await Promise.allSettled(filteredUrls.map((url) => scrapeAndScore(url, anchor, mergedKeywords)));
   const paragraphsByUrl = {};
   for (const [i, result] of scrapeResults.entries()) {
     if (result.status === "fulfilled" && result.value.length > 0) paragraphsByUrl[filteredUrls[i]] = result.value;
@@ -450,28 +554,32 @@ async function runAnalysis(domain, anchor, linkto) {
   if (!Object.keys(paragraphsByUrl).length) throw new Error("No suitable paragraphs found. Try a different domain.");
 
   // STEP 4: Context re-ranking
-  let allScored = rerankWithContext(paragraphsByUrl, anchor, keywords);
+  let allScored = rerankWithContext(paragraphsByUrl, anchor, mergedKeywords);
   allScored.sort((a, b) => b.score - a.score);
   console.log(`[RANK] Top 5 scores: ${allScored.slice(0, 5).map((p) => p.score.toFixed(1)).join(", ")}`);
 
   const qualified = allScored.filter((p) => p.score >= 15);
-  const topParagraphs = (qualified.length >= 3 ? qualified : allScored).slice(0, 8);
+  const topParagraphs = (qualified.length >= 3 ? qualified : allScored).slice(0, 12);
   console.log(`[RANK] Sending ${topParagraphs.length} paragraphs to AI`);
 
-  // STEP 5: AI placement
-  const aiResult = await analyzeWithAI(topParagraphs, anchor, linkto);
-  const articleUrl = findBestUrlMatch(aiResult.paragraph, allScored, filteredUrls[0]);
+  // STEP 5: AI placement — 2 suggestions, excluding already-seen paragraphs
+  const aiSuggestions = await analyzeWithAI(topParagraphs, anchor, linkto, linktoInfo, excludedParagraphs);
 
-  return {
-    article_url: articleUrl,
-    paragraph: aiResult.paragraph,
-    suggested_sentence: aiResult.suggested_sentence || null,
-    suggested_edit: aiResult.suggested_edit,
-    reason: aiResult.reason || "",
-    relevance_score: aiResult.relevance_score,
-    naturalness_score: aiResult.naturalness_score || null,
-    natural_fit: aiResult.relevance_score >= 80 ? "high" : aiResult.relevance_score >= 55 ? "medium" : "low",
-  };
+  const results = aiSuggestions.map((aiResult) => {
+    const articleUrl = findBestUrlMatch(aiResult.paragraph, allScored, filteredUrls[0]);
+    return {
+      article_url: articleUrl,
+      paragraph: aiResult.paragraph,
+      suggested_sentence: aiResult.suggested_sentence || null,
+      suggested_edit: aiResult.suggested_edit,
+      reason: aiResult.reason || "",
+      relevance_score: aiResult.relevance_score,
+      naturalness_score: aiResult.naturalness_score || null,
+      natural_fit: aiResult.relevance_score >= 80 ? "high" : aiResult.relevance_score >= 55 ? "medium" : "low",
+    };
+  });
+
+  return results;
 }
 
 app.post("/api/analyze", async (req, res) => {
@@ -480,21 +588,30 @@ app.post("/api/analyze", async (req, res) => {
   const rawDomain = req.body.domain || "";
   const domain = rawDomain.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
   const { anchor, linkto } = req.body;
+  const excludedParagraphs = Array.isArray(req.body.excludedParagraphs) ? req.body.excludedParagraphs : [];
+
   const validationError = validateInputs(domain, anchor, linkto);
   if (validationError) return res.status(400).json({ error: validationError });
-  const cacheKey = `${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}`;
+
+  // Cache key includes excluded paragraphs hash so regenerate gets fresh results
+  const excludeHash = excludedParagraphs.length > 0
+    ? Buffer.from(excludedParagraphs.join("|")).toString("base64").slice(0, 16)
+    : "0";
+  const cacheKey = `${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${excludeHash}`;
+
   const cached = cache.get(cacheKey);
   if (cached) { console.log(`[CACHE] Hit: ${cacheKey}`); return res.status(200).json({ ...cached, cached: true }); }
   if (inFlight.has(cacheKey)) {
     try { const result = await inFlight.get(cacheKey); return res.status(200).json({ ...result, cached: true }); }
     catch { return res.status(500).json({ error: "Analysis failed. Please try again." }); }
   }
-  const promise = runAnalysis(domain, anchor, linkto).finally(() => inFlight.delete(cacheKey));
+  const promise = runAnalysis(domain, anchor, linkto, excludedParagraphs).finally(() => inFlight.delete(cacheKey));
   inFlight.set(cacheKey, promise);
   try {
-    const result = await promise;
-    cache.set(cacheKey, result);
-    return res.status(200).json({ ...result, cached: false });
+    const results = await promise;
+    const response = { suggestions: results, cached: false };
+    cache.set(cacheKey, response);
+    return res.status(200).json(response);
   } catch (err) {
     console.error(`[ERROR] ${err.stack || err.message}`);
     const userFacing = err.message?.includes("No articles") || err.message?.includes("No suitable") || err.message?.includes("All found URLs")
