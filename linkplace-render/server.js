@@ -192,7 +192,7 @@ function extractLinktoFromSlug(linkto) {
   } catch { return { title: "", snippet: "", isToolPage: false, keywords: [] }; }
 }
 
-
+function isBlockedPage(html, statusCode) {
   if (statusCode === 403 || statusCode === 429) return true;
   const lower = html.toLowerCase();
   return (
