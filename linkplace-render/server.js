@@ -75,6 +75,22 @@ function isArticleUrl(url) {
     const lowerPath = urlPath.toLowerCase();
     const isBlogPath = BLOG_PATH_INDICATORS.some((indicator) => lowerPath.includes(indicator));
     if (!isBlogPath) return false;
+    // Reject index/listing pages — must have a meaningful slug after the blog segment
+    // e.g. /blogs/ alone or /blogs/blog*home*2 are index pages
+    const blogSegIdx = segments.findIndex((s) =>
+      ["blog", "blogs", "article", "articles", "post", "posts", "news", "insights",
+       "resources", "learn", "guide", "guides", "tips", "tutorial", "tutorials"].includes(s.toLowerCase())
+    );
+    if (blogSegIdx !== -1) {
+      const afterBlog = segments.slice(blogSegIdx + 1).filter(Boolean);
+      if (afterBlog.length === 0) return false; // /blogs/ with nothing after = index
+      const slug = afterBlog[afterBlog.length - 1];
+      // Reject slugs that look like pagination or junk (contain * or are just numbers)
+      if (/\*/.test(slug)) return false;
+      if (/^\d+$/.test(slug)) return false;
+      // Slug must be reasonably long and word-like
+      if (slug.length < 5) return false;
+    }
     return true;
   } catch { return false; }
 }
@@ -465,7 +481,7 @@ Return this exact JSON with two suggestions:
     signal: AbortSignal.timeout(30000),
     body: JSON.stringify({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 1200,
+      max_tokens: 2500,
       temperature: 0.1,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],
@@ -599,7 +615,9 @@ app.post("/api/analyze", async (req, res) => {
     : "0";
   const cacheKey = `${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${excludeHash}`;
 
-  const cached = cache.get(cacheKey);
+  // Only use cache for fresh requests (no exclusions) — regenerate always runs fresh
+  const useCache = excludedParagraphs.length === 0;
+  const cached = useCache ? cache.get(cacheKey) : null;
   if (cached) { console.log(`[CACHE] Hit: ${cacheKey}`); return res.status(200).json({ ...cached, cached: true }); }
   if (inFlight.has(cacheKey)) {
     try { const result = await inFlight.get(cacheKey); return res.status(200).json({ ...result, cached: true }); }
