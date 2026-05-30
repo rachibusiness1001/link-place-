@@ -424,17 +424,14 @@ function findBestUrlMatch(aiParagraph, allScoredParagraphs, fallbackUrl) {
 }
 
 async function analyzeWithAI(paragraphs, anchor, linkto, linktoInfo, excludedParagraphs = []) {
-  // Filter out excluded paragraphs (already shown to user)
-  const available = paragraphs.filter((p) => !excludedParagraphs.includes(p.text.slice(0, 80)));
-
   // If linkto is a tool page, skip paragraphs that already mention a tool
-  const filtered = linktoInfo?.isToolPage
-    ? available.filter((p) => !mentionstool(p.text))
-    : available;
+  const pool = linktoInfo?.isToolPage
+    ? paragraphs.filter((p) => !mentionstool(p.text))
+    : paragraphs;
 
-  const pool = (filtered.length >= 4 ? filtered : available).slice(0, 10);
+  const finalPool = (pool.length >= 4 ? pool : paragraphs).slice(0, 12);
 
-  const paragraphText = pool.map((p, i) => `[${i + 1}]\n${p.text.slice(0, 1000)}`).join("\n\n---\n\n");
+  const paragraphText = finalPool.map((p, i) => `[${i + 1}]\n${p.text.slice(0, 1000)}`).join("\n\n---\n\n");
 
   const linktoBrief = linktoInfo?.title
     ? `Destination page topic: "${linktoInfo.title.slice(0, 100)}"`
@@ -539,47 +536,81 @@ async function scrapeAndScore(url, anchor, keywords) {
   }
 }
 
+// In-memory store for scraped paragraph pools (for regenerate without re-scraping)
+const paragraphPoolCache = new NodeCache({ stdTTL: 1800, checkperiod: 300, maxKeys: 200 });
+
 async function runAnalysis(domain, anchor, linkto, excludedParagraphs = []) {
   console.log(`[ANALYZE] domain=${domain}, anchor="${anchor}", excluded=${excludedParagraphs.length}`);
 
-  // STEP 1: AI keyword generation + linkto page analysis (parallel)
-  const [keywords, linktoInfo] = await Promise.all([
-    generateKeywordsWithAI(anchor, linkto),
-    analyzeLinktoPage(linkto),
-  ]);
-  console.log(`[LINKTO] isToolPage=${linktoInfo.isToolPage}, keywords=${linktoInfo.keywords.slice(0, 5).join(", ")}`);
+  const poolKey = `pool::${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}`;
 
-  // Merge linkto keywords into search keywords for better targeting
-  const mergedKeywords = [...new Set([...keywords, ...linktoInfo.keywords])];
+  let topParagraphs, allScored, filteredUrls, linktoInfo;
 
-  // STEP 2: Search with AI keywords
-  const urls = await searchArticles(domain, anchor, mergedKeywords);
-  if (!urls.length) throw new Error("No articles found. Try a different domain or anchor text.");
+  const cachedPool = paragraphPoolCache.get(poolKey);
 
-  let linktoDomain = "";
-  try { linktoDomain = new URL(linkto).hostname.replace(/^www\./, ""); } catch {}
-  const filteredUrls = urls.filter((url) => !url.includes(linktoDomain));
-  if (!filteredUrls.length) throw new Error("All found URLs belong to the linkto domain.");
+  if (cachedPool) {
+    // Regenerate — reuse scraped data, skip SerpAPI + scraping
+    console.log(`[POOL] Reusing cached paragraph pool (${cachedPool.topParagraphs.length} paragraphs)`);
+    ({ topParagraphs, allScored, filteredUrls, linktoInfo } = cachedPool);
+  } else {
+    // Fresh run — full pipeline
 
-  // STEP 3: Parallel scrape
-  const scrapeResults = await Promise.allSettled(filteredUrls.map((url) => scrapeAndScore(url, anchor, mergedKeywords)));
-  const paragraphsByUrl = {};
-  for (const [i, result] of scrapeResults.entries()) {
-    if (result.status === "fulfilled" && result.value.length > 0) paragraphsByUrl[filteredUrls[i]] = result.value;
+    // STEP 1: AI keyword generation + linkto page analysis (parallel)
+    const [keywords, lt] = await Promise.all([
+      generateKeywordsWithAI(anchor, linkto),
+      analyzeLinktoPage(linkto),
+    ]);
+    linktoInfo = lt;
+    console.log(`[LINKTO] isToolPage=${linktoInfo.isToolPage}, keywords=${linktoInfo.keywords.slice(0, 5).join(", ")}`);
+
+    const mergedKeywords = [...new Set([...keywords, ...linktoInfo.keywords])];
+
+    // STEP 2: Search
+    const urls = await searchArticles(domain, anchor, mergedKeywords);
+    if (!urls.length) throw new Error("No articles found. Try a different domain or anchor text.");
+
+    let linktoDomain = "";
+    try { linktoDomain = new URL(linkto).hostname.replace(/^www\./, ""); } catch {}
+    filteredUrls = urls.filter((url) => !url.includes(linktoDomain));
+    if (!filteredUrls.length) throw new Error("All found URLs belong to the linkto domain.");
+
+    console.log(`[SEARCH] Using ${filteredUrls.length} articles: ${filteredUrls.join(", ")}`);
+
+    // STEP 3: Parallel scrape
+    const scrapeResults = await Promise.allSettled(filteredUrls.map((url) => scrapeAndScore(url, anchor, mergedKeywords)));
+    const paragraphsByUrl = {};
+    for (const [i, result] of scrapeResults.entries()) {
+      if (result.status === "fulfilled" && result.value.length > 0) paragraphsByUrl[filteredUrls[i]] = result.value;
+    }
+    if (!Object.keys(paragraphsByUrl).length) throw new Error("No suitable paragraphs found. Try a different domain.");
+
+    // STEP 4: Context re-ranking — keep larger pool for regenerate
+    allScored = rerankWithContext(paragraphsByUrl, anchor, mergedKeywords);
+    allScored.sort((a, b) => b.score - a.score);
+    console.log(`[RANK] Top 5 scores: ${allScored.slice(0, 5).map((p) => p.score.toFixed(1)).join(", ")}`);
+
+    const qualified = allScored.filter((p) => p.score >= 15);
+    // Keep up to 30 paragraphs in pool so regenerate has fresh ones
+    topParagraphs = (qualified.length >= 3 ? qualified : allScored).slice(0, 30);
+    console.log(`[POOL] Storing ${topParagraphs.length} paragraphs for potential regenerate`);
+
+    // Cache the pool for regenerate
+    paragraphPoolCache.set(poolKey, { topParagraphs, allScored, filteredUrls, linktoInfo });
   }
-  if (!Object.keys(paragraphsByUrl).length) throw new Error("No suitable paragraphs found. Try a different domain.");
 
-  // STEP 4: Context re-ranking
-  let allScored = rerankWithContext(paragraphsByUrl, anchor, mergedKeywords);
-  allScored.sort((a, b) => b.score - a.score);
-  console.log(`[RANK] Top 5 scores: ${allScored.slice(0, 5).map((p) => p.score.toFixed(1)).join(", ")}`);
+  // STEP 5: AI placement — exclude already-seen paragraphs
+  const available = topParagraphs.filter((p) => {
+    const key = p.text.slice(0, 120);
+    return !excludedParagraphs.some((ex) => key.startsWith(ex) || ex.startsWith(key.slice(0, 80)));
+  });
 
-  const qualified = allScored.filter((p) => p.score >= 15);
-  const topParagraphs = (qualified.length >= 3 ? qualified : allScored).slice(0, 12);
-  console.log(`[RANK] Sending ${topParagraphs.length} paragraphs to AI`);
+  console.log(`[RANK] Pool: ${topParagraphs.length}, available after exclusion: ${available.length}`);
 
-  // STEP 5: AI placement — 2 suggestions, excluding already-seen paragraphs
-  const aiSuggestions = await analyzeWithAI(topParagraphs, anchor, linkto, linktoInfo, excludedParagraphs);
+  // If too few left, use full pool (better than failing)
+  const sendToAI = (available.length >= 4 ? available : topParagraphs).slice(0, 12);
+  console.log(`[RANK] Sending ${sendToAI.length} paragraphs to AI`);
+
+  const aiSuggestions = await analyzeWithAI(sendToAI, anchor, linkto, linktoInfo, excludedParagraphs);
 
   const results = aiSuggestions.map((aiResult) => {
     const articleUrl = findBestUrlMatch(aiResult.paragraph, allScored, filteredUrls[0]);
