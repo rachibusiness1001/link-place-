@@ -416,6 +416,51 @@
   .bulk-placeholder p { font-size: 14px; margin-top: 8px; }
 
   footer { text-align: center; padding: 48px 0 32px; font-size: 12px; color: var(--text3); }
+
+  /* Suggestion cards */
+  .suggestion-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  .suggestion-number {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text2);
+    letter-spacing: 0.05em;
+  }
+  .suggestion-block { margin-bottom: 28px; }
+  .suggestion-block:last-child { margin-bottom: 0; }
+  .suggestion-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 28px 0;
+  }
+
+  /* Regenerate button */
+  .btn-regenerate {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid rgba(124,109,250,0.3);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 20px;
+    width: 100%;
+    justify-content: center;
+  }
+  .btn-regenerate:hover { background: rgba(124,109,250,0.08); border-color: var(--accent); }
+  .btn-regenerate:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-regenerate svg { flex-shrink: 0; }
 </style>
 </head>
 <body>
@@ -506,50 +551,103 @@
   <!-- Results -->
   <div class="result-section" id="result-section">
 
-    <div class="result-card">
-      <div class="result-tag">Article Found</div>
-      <div class="article-url-row">
-        <a id="article-link" href="#" target="_blank"></a>
+    <!-- Suggestion 1 -->
+    <div class="result-card" id="suggestion-card-1">
+      <div class="suggestion-header">
+        <div class="result-tag">Suggestion 1</div>
+        <span class="suggestion-number">Best Match</span>
+      </div>
+      <div class="suggestion-block">
+        <div style="font-size:11px;font-weight:500;color:var(--text3);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;">Article Found</div>
+        <div class="article-url-row">
+          <a id="article-link-1" href="#" target="_blank"></a>
+        </div>
+      </div>
+      <div class="suggestion-block">
+        <div style="font-size:11px;font-weight:500;color:var(--text3);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;">Best Placement Paragraph</div>
+        <div class="paragraph-box" id="paragraph-box-1"></div>
+        <div class="score-row" id="score-row-1"></div>
+      </div>
+      <div class="suggestion-block">
+        <div style="font-size:11px;font-weight:500;color:var(--text3);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;">✏️ Suggested Edit</div>
+        <p style="font-size:13px;color:var(--text3);margin-bottom:14px;">Keep the rest of the paragraph as-is — only replace this one sentence.</p>
+        <div class="edit-compare">
+          <div>
+            <div class="edit-col-label original">✕ Original sentence</div>
+            <div class="edit-box original" id="original-sentence-box-1"></div>
+          </div>
+          <div>
+            <div class="edit-col-label suggested">✓ Suggested edit</div>
+            <div class="edit-box suggested" id="suggested-edit-box-1"></div>
+            <button class="copy-btn" id="copy-btn-1" onclick="copyEdit(1)">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy edited text
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="suggestion-block">
+        <div style="font-size:11px;font-weight:500;color:var(--text3);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;">Why This Spot</div>
+        <p class="reason-text" id="reason-text-1"></p>
       </div>
     </div>
 
-    <div class="result-card">
-      <div class="result-tag">Best Placement Paragraph</div>
-      <div class="paragraph-box" id="paragraph-box"></div>
-      <div class="score-row" id="score-row"></div>
-    </div>
-
-    <div class="result-card">
-      <div class="result-tag">✏️ Suggested Edit</div>
-      <p style="font-size:13px;color:var(--text3);margin-bottom:14px;">Keep the rest of the paragraph as-is — only replace this one sentence so the anchor fits naturally.</p>
-      <div class="edit-compare">
-        <div>
-          <div class="edit-col-label original">✕ Original sentence</div>
-          <div class="edit-box original" id="original-sentence-box"></div>
+    <!-- Suggestion 2 -->
+    <div class="result-card" id="suggestion-card-2" style="display:none;">
+      <div class="suggestion-header">
+        <div class="result-tag" style="background:rgba(250,109,143,0.1);border-color:rgba(250,109,143,0.2);color:var(--accent2);">Suggestion 2</div>
+        <span class="suggestion-number">Alternative</span>
+      </div>
+      <div class="suggestion-block">
+        <div style="font-size:11px;font-weight:500;color:var(--text3);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;">Article Found</div>
+        <div class="article-url-row">
+          <a id="article-link-2" href="#" target="_blank"></a>
         </div>
-        <div>
-          <div class="edit-col-label suggested">✓ Suggested edit</div>
-          <div class="edit-box suggested" id="suggested-edit-box"></div>
-          <button class="copy-btn" id="copy-btn" onclick="copyEdit()">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            Copy edited text
-          </button>
+      </div>
+      <div class="suggestion-block">
+        <div style="font-size:11px;font-weight:500;color:var(--text3);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;">Best Placement Paragraph</div>
+        <div class="paragraph-box" id="paragraph-box-2"></div>
+        <div class="score-row" id="score-row-2"></div>
+      </div>
+      <div class="suggestion-block">
+        <div style="font-size:11px;font-weight:500;color:var(--text3);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;">✏️ Suggested Edit</div>
+        <p style="font-size:13px;color:var(--text3);margin-bottom:14px;">Keep the rest of the paragraph as-is — only replace this one sentence.</p>
+        <div class="edit-compare">
+          <div>
+            <div class="edit-col-label original">✕ Original sentence</div>
+            <div class="edit-box original" id="original-sentence-box-2"></div>
+          </div>
+          <div>
+            <div class="edit-col-label suggested">✓ Suggested edit</div>
+            <div class="edit-box suggested" id="suggested-edit-box-2"></div>
+            <button class="copy-btn" id="copy-btn-2" onclick="copyEdit(2)">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy edited text
+            </button>
+          </div>
         </div>
+      </div>
+      <div class="suggestion-block">
+        <div style="font-size:11px;font-weight:500;color:var(--text3);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;">Why This Spot</div>
+        <p class="reason-text" id="reason-text-2"></p>
       </div>
     </div>
 
-    <div class="result-card">
-      <div class="result-tag">Why This Spot</div>
-      <p class="reason-text" id="reason-text"></p>
-    </div>
+    <!-- Regenerate button -->
+    <button class="btn-regenerate" id="regenerate-btn" onclick="regenerate()" style="display:none;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      Not satisfied? Get new suggestions
+    </button>
 
   </div>
 
-  <footer>LinkPlace &mdash; AI-powered link insertion tool &mdash; v1.0</footer>
+  <footer>LinkPlace &mdash; AI-powered link insertion tool &mdash; v2.0</footer>
 </div>
 
 <script>
 let stepTimer, currentStep = 0;
+let _excludedParagraphs = []; // Track paragraphs already shown to user
+let _editPlainText = [null, null]; // Plain text for copy buttons
 
 function switchTab(tab) {
   document.getElementById('tab-single').classList.toggle('active', tab === 'single');
@@ -563,24 +661,99 @@ function switchTab(tab) {
 function startLoading() {
   currentStep = 0;
   document.getElementById('loading-card').classList.add('show');
-  for (let i = 0; i < 5; i++) document.getElementById('step-' + i).className = '';
+  for (let i = 0; i < 6; i++) {
+    const el = document.getElementById('step-' + i);
+    if (el) el.className = '';
+  }
   document.getElementById('step-0').classList.add('active');
   stepTimer = setInterval(() => {
-    if (currentStep < 4) {
+    if (currentStep < 5) {
       document.getElementById('step-' + currentStep).className = 'done';
       currentStep++;
       document.getElementById('step-' + currentStep).classList.add('active');
     }
-  }, 2800);
+  }, 2500);
 }
 
 function stopLoading() {
   clearInterval(stepTimer);
-  for (let i = 0; i <= currentStep; i++) document.getElementById('step-' + i).className = 'done';
+  for (let i = 0; i <= currentStep; i++) {
+    const el = document.getElementById('step-' + i);
+    if (el) el.className = 'done';
+  }
   setTimeout(() => document.getElementById('loading-card').classList.remove('show'), 400);
 }
 
+function renderSuggestion(s, idx, anchor) {
+  const n = idx + 1;
+  const card = document.getElementById('suggestion-card-' + n);
+  if (!card) return;
+
+  // Article URL
+  const articleLink = document.getElementById('article-link-' + n);
+  articleLink.href = s.article_url || '';
+  articleLink.textContent = s.article_url || '';
+
+  // Paragraph with highlighted sentence
+  const para = s.paragraph || '';
+  const sentence = s.suggested_sentence || '';
+  let highlighted = escapeHtml(para);
+  if (sentence && para.includes(sentence)) {
+    highlighted = highlighted.replace(
+      escapeHtml(sentence),
+      `<span class="highlight-sentence">${escapeHtml(sentence)}</span>`
+    );
+  }
+  document.getElementById('paragraph-box-' + n).innerHTML = highlighted;
+
+  // Scores
+  const score = s.relevance_score || 0;
+  const fit = s.natural_fit || 'medium';
+  const scoreClass = score >= 75 ? 'pill-green' : score >= 50 ? 'pill-amber' : 'pill-red';
+  const fitClass = fit === 'high' ? 'pill-green' : fit === 'medium' ? 'pill-amber' : 'pill-red';
+  document.getElementById('score-row-' + n).innerHTML = `
+    <span class="score-pill ${scoreClass}">Relevance: ${score}/100</span>
+    <span class="score-pill ${fitClass}">Natural fit: ${fit}</span>
+  `;
+
+  // Suggested edit
+  document.getElementById('original-sentence-box-' + n).innerHTML =
+    `<span class="original-strike">${escapeHtml(s.suggested_sentence || '')}</span>`;
+  const editHtml = escapeHtml(s.suggested_edit || '').replace(
+    '[[ANCHOR]]',
+    `<span class="anchor-link">${escapeHtml(anchor)}</span>`
+  );
+  document.getElementById('suggested-edit-box-' + n).innerHTML = editHtml;
+  _editPlainText[idx] = (s.suggested_edit || '').replace('[[ANCHOR]]', anchor);
+
+  // Reason
+  document.getElementById('reason-text-' + n).textContent = s.reason || '';
+
+  card.style.display = 'block';
+}
+
+async function callAPI(domain, anchor, linkto, excludedParagraphs) {
+  const res = await fetch('/api/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ domain, anchor, linkto, excludedParagraphs })
+  });
+  const result = await res.json();
+  if (!res.ok) throw new Error(result.error || 'Something went wrong');
+  return result;
+}
+
 async function analyze() {
+  // Reset excluded paragraphs on fresh analyze
+  _excludedParagraphs = [];
+  await runAnalysis();
+}
+
+async function regenerate() {
+  await runAnalysis(true);
+}
+
+async function runAnalysis(isRegenerate = false) {
   const domain = document.getElementById('domain').value.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
   const anchor = document.getElementById('anchor').value.trim();
   const linkto = document.getElementById('linkto').value.trim();
@@ -594,66 +767,35 @@ async function analyze() {
   }
 
   const btn = document.getElementById('analyze-btn');
+  const regenBtn = document.getElementById('regenerate-btn');
   btn.disabled = true;
   btn.textContent = 'Analyzing...';
+  if (regenBtn) regenBtn.disabled = true;
+
+  // Hide old results
   document.getElementById('result-section').classList.remove('show');
+  document.getElementById('suggestion-card-1').style.display = 'none';
+  document.getElementById('suggestion-card-2').style.display = 'none';
+  if (regenBtn) regenBtn.style.display = 'none';
+
   startLoading();
 
   try {
-    const res = await fetch('/api/analyze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ domain, anchor, linkto })
-    });
-
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.error || 'Something went wrong');
-
+    const result = await callAPI(domain, anchor, linkto, _excludedParagraphs);
     stopLoading();
 
-    // Article URL
-    const articleUrl = result.article_url || '';
-    const articleLink = document.getElementById('article-link');
-    articleLink.href = articleUrl;
-    articleLink.textContent = articleUrl;
+    const suggestions = result.suggestions || [];
+    if (!suggestions.length) throw new Error('No suggestions returned. Try again.');
 
-    // Paragraph with highlighted sentence
-    const para = result.paragraph || '';
-    const sentence = result.suggested_sentence || '';
-    let highlighted = escapeHtml(para);
-    if (sentence && para.includes(sentence)) {
-      highlighted = highlighted.replace(
-        escapeHtml(sentence),
-        `<span class="highlight-sentence">${escapeHtml(sentence)}</span>`
-      );
+    // Track these paragraphs as excluded for future regenerate
+    for (const s of suggestions) {
+      if (s.paragraph) _excludedParagraphs.push(s.paragraph.slice(0, 80));
     }
-    document.getElementById('paragraph-box').innerHTML = highlighted;
 
-    // Scores
-    const score = result.relevance_score || 0;
-    const fit = result.natural_fit || 'medium';
-    const scoreClass = score >= 75 ? 'pill-green' : score >= 50 ? 'pill-amber' : 'pill-red';
-    const fitClass = fit === 'high' ? 'pill-green' : fit === 'medium' ? 'pill-amber' : 'pill-red';
-    document.getElementById('score-row').innerHTML = `
-      <span class="score-pill ${scoreClass}">Relevance: ${score}/100</span>
-      <span class="score-pill ${fitClass}">Natural fit: ${fit}</span>
-    `;
-
-    // Suggested edit comparison
-    document.getElementById('original-sentence-box').innerHTML =
-      `<span class="original-strike">${escapeHtml(result.suggested_sentence || '')}</span>`;
-
-    const editHtml = escapeHtml(result.suggested_edit || '').replace(
-      '[[ANCHOR]]',
-      `<span class="anchor-link">${escapeHtml(anchor)}</span>`
-    );
-    document.getElementById('suggested-edit-box').innerHTML = editHtml;
-    window._editPlainText = (result.suggested_edit || '').replace('[[ANCHOR]]', anchor);
-
-    // Reason
-    document.getElementById('reason-text').textContent = result.reason || '';
+    suggestions.forEach((s, i) => renderSuggestion(s, i, anchor));
 
     document.getElementById('result-section').classList.add('show');
+    if (regenBtn) regenBtn.style.display = 'flex';
 
   } catch (err) {
     stopLoading();
@@ -664,12 +806,13 @@ async function analyze() {
 
   btn.disabled = false;
   btn.textContent = 'Find Best Placement ↗';
+  if (regenBtn) regenBtn.disabled = false;
 }
 
-function copyEdit() {
-  const text = window._editPlainText || '';
+function copyEdit(n) {
+  const text = _editPlainText[n - 1] || '';
   navigator.clipboard.writeText(text).then(() => {
-    const btn = document.getElementById('copy-btn');
+    const btn = document.getElementById('copy-btn-' + n);
     btn.classList.add('copied');
     btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Copied!`;
     setTimeout(() => {
