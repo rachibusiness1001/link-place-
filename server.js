@@ -138,8 +138,6 @@ async function generateKeywordsWithAI(anchor, linkto, linktoInfo = null) {
         system: "You are an SEO keyword expert. Return ONLY a comma-separated list of keywords. No explanation, no numbering, no extra text.",
         messages: [{
           role: "user",
-        messages: [{
-          role: "user",
           content: `Generate 10-12 semantic search keywords for finding blog articles where this anchor text would naturally fit.
 Anchor: "${anchor}"
 Target Page URL: ${linkto}
