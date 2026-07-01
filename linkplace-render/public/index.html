@@ -517,6 +517,15 @@
         </div>
       </div>
 
+      <div class="field" style="margin-top: 16px;">
+        <label>Alternate Anchor text (Optional)</label>
+        <div class="input-wrap">
+          <span class="input-icon">#</span>
+          <input type="text" id="altAnchor" placeholder="Fallback anchor if primary fails" />
+        </div>
+        <div class="field-hint">Automatically used if no placement is found for the primary anchor.</div>
+      </div>
+
       <button class="btn-primary" id="analyze-btn" onclick="analyze()">
         Find Best Placement ↗
       </button>
@@ -634,10 +643,17 @@
     </div>
 
     <!-- Regenerate button -->
-    <button class="btn-regenerate" id="regenerate-btn" onclick="regenerate()" style="display:none;">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-      Not satisfied? Get new suggestions
-    </button>
+    <div style="display:flex; gap:12px;">
+      <button class="btn-regenerate" id="regenerate-btn" onclick="regenerate()" style="display:none; flex: 1;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        Not satisfied? Get new suggestions
+      </button>
+      
+      <button class="btn-regenerate" id="export-csv-btn" onclick="exportToCSV()" style="display:none; flex: 1; border-color: rgba(74,222,128,0.3); color: var(--green);">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export to CSV
+      </button>
+    </div>
 
   </div>
 
@@ -648,6 +664,8 @@
 let stepTimer, currentStep = 0;
 let _excludedParagraphs = []; // Track paragraphs already shown to user
 let _editPlainText = [null, null]; // Plain text for copy buttons
+let _lastSuccessfulResult = null; // Store for CSV export
+let _lastInputs = null; // Store for CSV export
 
 function switchTab(tab) {
   document.getElementById('tab-single').classList.toggle('active', tab === 'single');
@@ -732,11 +750,11 @@ function renderSuggestion(s, idx, anchor) {
   card.style.display = 'block';
 }
 
-async function callAPI(domain, anchor, linkto, excludedParagraphs) {
+async function callAPI(domain, anchor, altAnchor, linkto, excludedParagraphs) {
   const res = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ domain, anchor, linkto, excludedParagraphs })
+    body: JSON.stringify({ domain, anchor, altAnchor, linkto, excludedParagraphs })
   });
   const result = await res.json();
   if (!res.ok) throw new Error(result.error || 'Something went wrong');
@@ -756,6 +774,7 @@ async function regenerate() {
 async function runAnalysis(isRegenerate = false) {
   const domain = document.getElementById('domain').value.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
   const anchor = document.getElementById('anchor').value.trim();
+  const altAnchor = document.getElementById('altAnchor').value.trim();
   const linkto = document.getElementById('linkto').value.trim();
   const errBox = document.getElementById('error-box');
   errBox.classList.remove('show');
@@ -781,7 +800,7 @@ async function runAnalysis(isRegenerate = false) {
   startLoading();
 
   try {
-    const result = await callAPI(domain, anchor, linkto, _excludedParagraphs);
+    const result = await callAPI(domain, anchor, altAnchor, linkto, _excludedParagraphs);
     stopLoading();
 
     const suggestions = result.suggestions || [];
@@ -796,8 +815,13 @@ async function runAnalysis(isRegenerate = false) {
 
     suggestions.forEach((s, i) => renderSuggestion(s, i, anchor));
 
+    _lastSuccessfulResult = result;
+    _lastInputs = { domain, anchor, altAnchor, linkto };
+
     document.getElementById('result-section').classList.add('show');
     if (regenBtn) regenBtn.style.display = 'flex';
+    const csvBtn = document.getElementById('export-csv-btn');
+    if (csvBtn) csvBtn.style.display = 'flex';
 
   } catch (err) {
     stopLoading();
@@ -830,6 +854,44 @@ function escapeHtml(text) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function exportToCSV() {
+  if (!_lastSuccessfulResult || !_lastSuccessfulResult.suggestions) return;
+  const { domain, anchor, linkto } = _lastInputs;
+  
+  // CSV Header
+  let csvContent = "Domain,Target URL,Primary Anchor,Article URL,Original Paragraph,Suggested Edit,Reason\\n";
+
+  _lastSuccessfulResult.suggestions.forEach(s => {
+    // Escape quotes in CSV fields
+    const escapeCSV = (str) => '"' + String(str).replace(/"/g, '""') + '"';
+    
+    // The edit might contain the [[ANCHOR]] placeholder, replace it with the anchor used
+    const suggestedEdit = (s.suggested_edit || '').replace('[[ANCHOR]]', anchor);
+    const originalParagraph = s.paragraph || '';
+    const articleUrl = s.article_url || '';
+    const reason = s.reason || '';
+
+    csvContent += [
+      escapeCSV(domain),
+      escapeCSV(linkto),
+      escapeCSV(anchor),
+      escapeCSV(articleUrl),
+      escapeCSV(originalParagraph),
+      escapeCSV(suggestedEdit),
+      escapeCSV(reason)
+    ].join(",") + "\\n";
+  });
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", `LinkPlace_Export_${domain}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 document.addEventListener('keydown', e => {

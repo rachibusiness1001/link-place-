@@ -120,16 +120,9 @@ function extractKeywordsLocal(text) {
 }
 
 // ─── AI Keyword Generation ─────────────────────────────────────────────────────
-async function generateKeywordsWithAI(anchor, linkto) {
+async function generateKeywordsWithAI(anchor, linkto, linktoInfo = null) {
   console.log(`[KEYWORDS] Generating AI keywords for anchor="${anchor}" linkto="${linkto}"`);
   try {
-    // Extract slug from linkto URL for extra context
-    let urlContext = "";
-    try {
-      const slug = new URL(linkto).pathname.replace(/\//g, " ").replace(/-/g, " ").trim();
-      urlContext = slug ? `URL context: ${slug}` : "";
-    } catch {}
-
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -145,9 +138,15 @@ async function generateKeywordsWithAI(anchor, linkto) {
         system: "You are an SEO keyword expert. Return ONLY a comma-separated list of keywords. No explanation, no numbering, no extra text.",
         messages: [{
           role: "user",
+        messages: [{
+          role: "user",
           content: `Generate 10-12 semantic search keywords for finding blog articles where this anchor text would naturally fit.
 Anchor: "${anchor}"
-${urlContext}
+Target Page URL: ${linkto}
+Target Page Title: ${linktoInfo?.title || ''}
+Target Page Snippet: ${linktoInfo?.snippet || ''}
+
+Context: Understand the company/product from the Target Page information above. If the anchor is just a company name, generate keywords based on what the company ACTUALLY DOES (e.g. email security, dmarc, revenue intelligence).
 Rules:
 - Include related concepts, synonyms, industry terms
 - Include both broad and specific terms
@@ -565,12 +564,10 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = []) {
   } else {
     // Fresh run — full pipeline
 
-    // STEP 1: AI keyword generation + linkto page analysis (parallel)
-    const [keywords, lt] = await Promise.all([
-      generateKeywordsWithAI(anchor, linkto),
-      analyzeLinktoPage(linkto),
-    ]);
+    // STEP 1: Linkto page analysis -> AI keyword generation (sequential so AI gets context)
+    const lt = await analyzeLinktoPage(linkto);
     linktoInfo = lt;
+    const keywords = await generateKeywordsWithAI(anchor, linkto, linktoInfo);
     console.log(`[LINKTO] isToolPage=${linktoInfo.isToolPage}, keywords=${linktoInfo.keywords.slice(0, 5).join(", ")}`);
 
     const mergedKeywords = [...new Set([...keywords, ...linktoInfo.keywords])];
@@ -655,7 +652,7 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = []) {
 app.post("/api/analyze", async (req, res) => {
   const rawDomain = req.body.domain || "";
   const domain = rawDomain.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
-  const { anchor, linkto } = req.body;
+  const { anchor, altAnchor, linkto } = req.body;
   const excludedParagraphs = Array.isArray(req.body.excludedParagraphs) ? req.body.excludedParagraphs : [];
 
   const validationError = validateInputs(domain, anchor, linkto);
@@ -675,7 +672,20 @@ app.post("/api/analyze", async (req, res) => {
     try { const result = await inFlight.get(cacheKey); return res.status(200).json({ ...result, cached: true }); }
     catch { return res.status(500).json({ error: "Analysis failed. Please try again." }); }
   }
-  const promise = runAnalysis(domain, anchor, linkto, excludedParagraphs).finally(() => inFlight.delete(cacheKey));
+
+  const attemptAnalysis = async () => {
+    try {
+      return await runAnalysis(domain, anchor, linkto, excludedParagraphs);
+    } catch (err) {
+      if (altAnchor && excludedParagraphs.length === 0) {
+        console.log(`[FALLBACK] Primary anchor failed: ${err.message}. Retrying with alternate anchor: "${altAnchor}"`);
+        return await runAnalysis(domain, altAnchor, linkto, excludedParagraphs);
+      }
+      throw err;
+    }
+  };
+
+  const promise = attemptAnalysis().finally(() => inFlight.delete(cacheKey));
   inFlight.set(cacheKey, promise);
   try {
     const results = await promise;
