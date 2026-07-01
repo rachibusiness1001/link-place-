@@ -8,8 +8,15 @@ const { JSDOM } = require("jsdom");
 const { Readability } = require("@mozilla/readability");
 const NodeCache = require("node-cache");
 const rateLimit = require("express-rate-limit");
+const crypto = require("crypto");
+
+if (!process.env.ANTHROPIC_API_KEY || !process.env.SERPAPI_KEY) {
+  console.error("CRITICAL: Missing ANTHROPIC_API_KEY or SERPAPI_KEY in environment");
+  process.exit(1);
+}
 
 const app = express();
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "50kb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -25,7 +32,7 @@ app.use("/api/analyze", limiter);
 const cache = new NodeCache({ stdTTL: 3600, checkperiod: 600, maxKeys: 500 });
 const inFlight = new Map();
 
-const DOMAIN_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9](\.[a-zA-Z]{2,})+$/;
+const DOMAIN_RE = /^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/;
 const URL_RE = /^https?:\/\/.+/;
 
 function validateInputs(domain, anchor, linkto) {
@@ -74,7 +81,6 @@ function isArticleUrl(url) {
     // Must be a blog/article path — not a landing page
     const lowerPath = urlPath.toLowerCase();
     const isBlogPath = BLOG_PATH_INDICATORS.some((indicator) => lowerPath.includes(indicator));
-    if (!isBlogPath) return false;
     // Reject index/listing pages — must have a meaningful slug after the blog segment
     // e.g. /blogs/ alone or /blogs/blog*home*2 are index pages
     const blogSegIdx = segments.findIndex((s) =>
@@ -90,6 +96,9 @@ function isArticleUrl(url) {
       if (/^\d+$/.test(slug)) return false;
       // Slug must be reasonably long and word-like
       if (slug.length < 5) return false;
+    } else {
+      const slug = segments[segments.length - 1];
+      if (/\*/.test(slug) || /^\d+$/.test(slug) || slug.length < 5) return false;
     }
     return true;
   } catch { return false; }
@@ -230,30 +239,29 @@ const DEFAULT_HEADERS = {
 
 async function fetchWithRetry(url, maxAttempts = 2, timeoutMs = 18000) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
       const res = await fetch(url, { headers: DEFAULT_HEADERS, signal: controller.signal, redirect: "follow" });
-      clearTimeout(timer);
       const html = await res.text();
       return { html, status: res.status };
     } catch (err) {
       if (attempt === maxAttempts) throw err;
       console.log(`[FETCH] Attempt ${attempt} failed for ${url}: ${err.message}. Retrying...`);
       await new Promise((r) => setTimeout(r, 1200 * attempt));
+    } finally {
+      clearTimeout(timer);
     }
   }
 }
 
 async function searchArticles(domain, anchor, keywords) {
-  // Use top AI keywords for better queries
-  const topKeywords = keywords.slice(0, 6).join(" ");
   const phrase = anchor.toLowerCase().trim();
   const queries = [
-    `site:${domain} inurl:blog "${phrase}"`,
-    `site:${domain} inurl:blog ${topKeywords}`,
-    `site:${domain} inurl:article ${topKeywords}`,
-    `site:${domain} inurl:blog`,
+    `site:${domain} "${phrase}"`,
+    `site:${domain} ${phrase}`,
+    `site:${domain} ${keywords.slice(0, 2).join(" ")}`,
+    `site:${domain} ${keywords[0] || "blog"}`,
   ];
 
   const allUrls = new Set();
@@ -401,29 +409,29 @@ function rerankWithContext(allParagraphsByUrl, anchor, keywords) {
   return result;
 }
 
-function findBestUrlMatch(aiParagraph, allScoredParagraphs, fallbackUrl) {
-  if (!aiParagraph) return fallbackUrl;
+function findBestMatch(aiParagraph, allScoredParagraphs) {
+  if (!aiParagraph) return null;
   const normAi = aiParagraph.toLowerCase().replace(/\s+/g, " ").trim();
   const exact = allScoredParagraphs.find((p) => p.text.toLowerCase().replace(/\s+/g, " ").trim() === normAi);
-  if (exact) return exact.url;
+  if (exact) return exact;
   const contained = allScoredParagraphs.find((p) => {
     const pNorm = p.text.toLowerCase().replace(/\s+/g, " ").trim();
     return pNorm.includes(normAi.slice(0, 80)) || normAi.includes(pNorm.slice(0, 80));
   });
-  if (contained) return contained.url;
+  if (contained) return contained;
   const aiWords = new Set(normAi.split(/\s+/).filter((w) => w.length > 5));
-  let best = { score: 0, url: fallbackUrl };
+  let best = { score: 0, p: null };
   for (const p of allScoredParagraphs) {
     const pWords = p.text.toLowerCase().split(/\s+/).filter((w) => w.length > 5);
     const overlap = pWords.filter((w) => aiWords.has(w)).length;
     const ratio = overlap / Math.max(aiWords.size, 1);
-    if (ratio > best.score) best = { score: ratio, url: p.url };
+    if (ratio > best.score) best = { score: ratio, p };
   }
-  if (best.score >= 0.3) return best.url;
-  return fallbackUrl;
+  if (best.score >= 0.3) return best.p;
+  return null;
 }
 
-async function analyzeWithAI(paragraphs, anchor, linkto, linktoInfo, excludedParagraphs = []) {
+async function analyzeWithAI(paragraphs, anchor, linkto, linktoInfo) {
   // If linkto is a tool page, skip paragraphs that already mention a tool
   const pool = linktoInfo?.isToolPage
     ? paragraphs.filter((p) => !mentionstool(p.text))
@@ -431,7 +439,7 @@ async function analyzeWithAI(paragraphs, anchor, linkto, linktoInfo, excludedPar
 
   const finalPool = (pool.length >= 4 ? pool : paragraphs).slice(0, 12);
 
-  const paragraphText = finalPool.map((p, i) => `[${i + 1}]\n${p.text.slice(0, 1000)}`).join("\n\n---\n\n");
+  const paragraphText = finalPool.map((p, i) => `[${i + 1}] (Article: ${p.url})\n${p.text.slice(0, 1000)}`).join("\n\n---\n\n");
 
   const linktoBrief = linktoInfo?.title
     ? `Destination page topic: "${linktoInfo.title.slice(0, 100)}"`
@@ -445,9 +453,9 @@ Pick the TWO best paragraphs where inserting the anchor link feels completely na
 Rules:
 - Choose paragraphs where topic MOST directly relates to the anchor text AND destination page topic
 - Edit ONLY one sentence per paragraph — use [[ANCHOR]] placeholder
-- Do NOT rewrite the paragraph
-- Suggestions must be from DIFFERENT paragraphs
-- If no paragraph is truly relevant, set relevance_score below 50
+- If the exact anchor doesn't perfectly fit the existing text, creatively rewrite or add to a sentence so the anchor fits seamlessly.
+- You MUST ALWAYS return exactly 2 suggestions. Do NOT fail or return empty.
+- Suggestions MUST be from DIFFERENT articles (different URLs)
 Paragraphs:
 ${paragraphText}
 Return this exact JSON with two suggestions:
@@ -487,10 +495,11 @@ Return this exact JSON with two suggestions:
   const data = await response.json();
   if (data.error) throw new Error(`Anthropic API error: ${data.error.message}`);
   const rawText = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-  const cleaned = rawText.replace(/```json|```/g, "").trim();
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("AI response was not valid JSON");
-  const parsed = JSON.parse(jsonMatch[0]);
+  const cleaned = rawText.trim();
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+  if (firstBrace === -1 || lastBrace === -1) throw new Error("AI response was not valid JSON");
+  const parsed = JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
   if (!parsed.suggestions || !Array.isArray(parsed.suggestions) || parsed.suggestions.length === 0) {
     throw new Error("AI response missing suggestions array");
   }
@@ -526,7 +535,8 @@ async function scrapeAndScore(url, anchor, keywords) {
       if (seen.has(text)) continue;
       if (!isQualityParagraph(text, linkCount)) continue;
       seen.add(text);
-      scored.push({ text, score: scoreParagraph(text, anchor, keywords), url });
+      const id = crypto.createHash('md5').update(url + text).digest('hex').slice(0, 10);
+      scored.push({ id, text, score: scoreParagraph(text, anchor, keywords), url });
     }
     console.log(`[SCRAPE] ${scored.length} quality paragraphs from ${url}`);
     return scored;
@@ -589,7 +599,7 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = []) {
     allScored.sort((a, b) => b.score - a.score);
     console.log(`[RANK] Top 5 scores: ${allScored.slice(0, 5).map((p) => p.score.toFixed(1)).join(", ")}`);
 
-    const qualified = allScored.filter((p) => p.score >= 15);
+    const qualified = allScored.filter((p) => p.score >= 5);
     // Keep up to 30 paragraphs in pool so regenerate has fresh ones
     topParagraphs = (qualified.length >= 3 ? qualified : allScored).slice(0, 30);
     console.log(`[POOL] Storing ${topParagraphs.length} paragraphs for potential regenerate`);
@@ -599,23 +609,36 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = []) {
   }
 
   // STEP 5: AI placement — exclude already-seen paragraphs
-  const available = topParagraphs.filter((p) => {
-    const key = p.text.slice(0, 120);
-    return !excludedParagraphs.some((ex) => key.startsWith(ex) || ex.startsWith(key.slice(0, 80)));
-  });
+  const available = topParagraphs.filter((p) => !excludedParagraphs.includes(p.id));
 
   console.log(`[RANK] Pool: ${topParagraphs.length}, available after exclusion: ${available.length}`);
 
-  // If too few left, use full pool (better than failing)
-  const sendToAI = (available.length >= 4 ? available : topParagraphs).slice(0, 12);
-  console.log(`[RANK] Sending ${sendToAI.length} paragraphs to AI`);
+  // If too few left, fall back to topParagraphs but still try to diversify
+  const poolToUse = available.length >= 2 ? available : topParagraphs;
 
-  const aiSuggestions = await analyzeWithAI(sendToAI, anchor, linkto, linktoInfo, excludedParagraphs);
+  // Group by URL to ensure diversity
+  const grouped = {};
+  for (const p of poolToUse) {
+    if (!grouped[p.url]) grouped[p.url] = [];
+    grouped[p.url].push(p);
+  }
+  
+  const diversePool = [];
+  for (const url in grouped) {
+    diversePool.push(...grouped[url].slice(0, 2));
+  }
+  diversePool.sort((a, b) => b.score - a.score);
+
+  const sendToAI = diversePool.slice(0, 12);
+  console.log(`[RANK] Sending ${sendToAI.length} paragraphs to AI (from ${Object.keys(grouped).length} distinct URLs)`);
+
+  const aiSuggestions = await analyzeWithAI(sendToAI, anchor, linkto, linktoInfo);
 
   const results = aiSuggestions.map((aiResult) => {
-    const articleUrl = findBestUrlMatch(aiResult.paragraph, allScored, filteredUrls[0]);
+    const match = findBestMatch(aiResult.paragraph, allScored);
     return {
-      article_url: articleUrl,
+      id: match ? match.id : null,
+      article_url: match ? match.url : filteredUrls[0],
       paragraph: aiResult.paragraph,
       suggested_sentence: aiResult.suggested_sentence || null,
       suggested_edit: aiResult.suggested_edit,
@@ -630,8 +653,6 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = []) {
 }
 
 app.post("/api/analyze", async (req, res) => {
-  if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: "Server configuration error" });
-  if (!process.env.SERPAPI_KEY) return res.status(500).json({ error: "Server configuration error" });
   const rawDomain = req.body.domain || "";
   const domain = rawDomain.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
   const { anchor, linkto } = req.body;
@@ -640,9 +661,9 @@ app.post("/api/analyze", async (req, res) => {
   const validationError = validateInputs(domain, anchor, linkto);
   if (validationError) return res.status(400).json({ error: validationError });
 
-  // Cache key includes excluded paragraphs hash so regenerate gets fresh results
+  // Use a secure hash to prevent cache collisions
   const excludeHash = excludedParagraphs.length > 0
-    ? Buffer.from(excludedParagraphs.join("|")).toString("base64").slice(0, 16)
+    ? crypto.createHash("md5").update(excludedParagraphs.join("|")).digest("hex").slice(0, 16)
     : "0";
   const cacheKey = `${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${excludeHash}`;
 
