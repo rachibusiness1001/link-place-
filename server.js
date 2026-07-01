@@ -256,14 +256,12 @@ async function fetchWithRetry(url, maxAttempts = 2, timeoutMs = 18000) {
 }
 
 async function searchArticles(domain, anchor, keywords) {
-  // Use top AI keywords for better queries
-  const topKeywords = keywords.slice(0, 6).join(" ");
   const phrase = anchor.toLowerCase().trim();
   const queries = [
     `site:${domain} "${phrase}"`,
-    `site:${domain} ${topKeywords}`,
-    `site:${domain} inurl:blog "${phrase}"`,
-    `site:${domain} inurl:blog ${topKeywords}`,
+    `site:${domain} ${phrase}`,
+    `site:${domain} ${keywords.slice(0, 2).join(" ")}`,
+    `site:${domain} ${keywords[0] || "blog"}`,
   ];
 
   const allUrls = new Set();
@@ -455,9 +453,9 @@ Pick the TWO best paragraphs where inserting the anchor link feels completely na
 Rules:
 - Choose paragraphs where topic MOST directly relates to the anchor text AND destination page topic
 - Edit ONLY one sentence per paragraph — use [[ANCHOR]] placeholder
-- Do NOT rewrite the paragraph
+- If the exact anchor doesn't perfectly fit the existing text, creatively rewrite or add to a sentence so the anchor fits seamlessly.
+- You MUST ALWAYS return exactly 2 suggestions. Do NOT fail or return empty.
 - Suggestions MUST be from DIFFERENT articles (different URLs)
-- If no paragraph is truly relevant, set relevance_score below 50
 Paragraphs:
 ${paragraphText}
 Return this exact JSON with two suggestions:
@@ -601,7 +599,7 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = []) {
     allScored.sort((a, b) => b.score - a.score);
     console.log(`[RANK] Top 5 scores: ${allScored.slice(0, 5).map((p) => p.score.toFixed(1)).join(", ")}`);
 
-    const qualified = allScored.filter((p) => p.score >= 15);
+    const qualified = allScored.filter((p) => p.score >= 5);
     // Keep up to 30 paragraphs in pool so regenerate has fresh ones
     topParagraphs = (qualified.length >= 3 ? qualified : allScored).slice(0, 30);
     console.log(`[POOL] Storing ${topParagraphs.length} paragraphs for potential regenerate`);
