@@ -120,9 +120,13 @@ function extractKeywordsLocal(text) {
 }
 
 // ─── AI Keyword Generation ─────────────────────────────────────────────────────
-async function generateKeywordsWithAI(anchor, linkto, linktoInfo = null) {
-  console.log(`[KEYWORDS] Generating AI keywords for anchor="${anchor}" linkto="${linkto}"`);
+async function generateKeywordsWithAI(anchor, linkto, linktoInfo = null, isBranded = false) {
+  console.log(`[KEYWORDS] Generating AI keywords for anchor="${anchor}" linkto="${linkto}" isBranded=${isBranded}`);
   try {
+    const brandedInstructions = isBranded
+      ? "\nBRANDED ANCHOR MODE: The anchor is just a brand/company name. IGNORE the brand name itself. Generate keywords SOLELY based on the Target Page topic (e.g., what the company does, or what the software is). We want to find articles discussing this underlying topic."
+      : "\nContext: Understand the company/product from the Target Page information above. If the anchor is just a company name, generate keywords based on what the company ACTUALLY DOES (e.g. email security, dmarc, revenue intelligence).";
+
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -143,8 +147,7 @@ Anchor: "${anchor}"
 Target Page URL: ${linkto}
 Target Page Title: ${linktoInfo?.title || ''}
 Target Page Snippet: ${linktoInfo?.snippet || ''}
-
-Context: Understand the company/product from the Target Page information above. If the anchor is just a company name, generate keywords based on what the company ACTUALLY DOES (e.g. email security, dmarc, revenue intelligence).
+${brandedInstructions}
 Rules:
 - Include related concepts, synonyms, industry terms
 - Include both broad and specific terms
@@ -252,9 +255,13 @@ async function fetchWithRetry(url, maxAttempts = 2, timeoutMs = 18000) {
   }
 }
 
-async function searchArticles(domain, anchor, keywords) {
+async function searchArticles(domain, anchor, keywords, isBranded = false) {
   const phrase = anchor.toLowerCase().trim();
-  const queries = [
+  const queries = isBranded ? [
+    `site:${domain} ${keywords.slice(0, 2).join(" ")}`,
+    `site:${domain} ${keywords[0] || "software"}`,
+    `site:${domain} ${keywords[1] || "tool"}`
+  ] : [
     `site:${domain} "${phrase}"`,
     `site:${domain} ${phrase}`,
     `site:${domain} ${keywords.slice(0, 2).join(" ")}`,
@@ -357,20 +364,30 @@ function computeTfIdfScore(text, keywords) {
   return (score / Math.sqrt(Math.max(wordCount, 1))) * 10;
 }
 
-function scoreParagraph(text, anchor, keywords) {
+function scoreParagraph(text, anchor, keywords, isBranded = false) {
   const lower = text.toLowerCase();
   const anchorLower = anchor.toLowerCase();
   let score = 0;
-  if (lower.includes(anchorLower)) {
-    score += 60;
-  } else {
-    const anchorWords = anchorLower.split(/\s+/).filter((w) => w.length > 2);
-    let bigramHits = 0;
-    for (let i = 0; i < anchorWords.length - 1; i++) {
-      if (lower.includes(`${anchorWords[i]} ${anchorWords[i + 1]}`)) bigramHits++;
+
+  if (!isBranded) {
+    if (lower.includes(anchorLower)) score += 60;
+    else {
+      const anchorWords = anchorLower.split(/\s+/).filter((w) => w.length > 3);
+      if (anchorWords.length >= 2) {
+        const bigrams = [];
+        for (let i = 0; i < anchorWords.length - 1; i++) {
+          bigrams.push(`${anchorWords[i]} ${anchorWords[i + 1]}`);
+        }
+        for (const bg of bigrams) {
+          if (lower.includes(bg)) score += 20;
+        }
+      }
     }
-    if (bigramHits > 0) score += 20 + bigramHits * 8;
+  } else {
+    // In branded mode, we strictly care about keyword/topic relevance, not if the brand is mentioned.
+    score += 40; 
   }
+
   score += computeTfIdfScore(text, keywords);
   const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 20);
   const wordCount = text.split(/\s+/).length;
@@ -428,7 +445,7 @@ function findBestMatch(aiParagraph, allScoredParagraphs) {
   return null;
 }
 
-async function analyzeWithAI(paragraphs, anchor, linkto, linktoInfo) {
+async function analyzeWithAI(paragraphs, anchor, linkto, linktoInfo, isBranded = false) {
   // If linkto is a tool page, skip paragraphs that already mention a tool
   const pool = linktoInfo?.isToolPage
     ? paragraphs.filter((p) => !mentionstool(p.text))
@@ -442,15 +459,17 @@ async function analyzeWithAI(paragraphs, anchor, linkto, linktoInfo) {
     ? `Destination page topic: "${linktoInfo.title.slice(0, 100)}"`
     : `Destination URL: ${linkto}`;
 
+  const brandedRule = isBranded
+    ? "\n- BRANDED ANCHOR: The anchor is a brand/company name. The paragraph likely does not contain the brand name yet. Add a sentence naturally introducing the brand as a solution or example relevant to the topic discussed."
+    : "\n- Edit ONLY one sentence per paragraph — use [[ANCHOR]] placeholder. If the exact anchor doesn't perfectly fit, creatively rewrite or add to a sentence.";
+
   const systemPrompt = `You are a senior SEO editor placing contextual internal links in blog articles. Your placements must read as if written by the original author. Never force links. Respond ONLY with valid JSON. No markdown, no backticks, no explanation outside JSON.`;
 
   const userPrompt = `Anchor text to place: "${anchor}"
 ${linktoBrief}
 Pick the TWO best paragraphs where inserting the anchor link feels completely natural.
-Rules:
-- Choose paragraphs where topic MOST directly relates to the anchor text AND destination page topic
-- Edit ONLY one sentence per paragraph — use [[ANCHOR]] placeholder
-- If the exact anchor doesn't perfectly fit the existing text, creatively rewrite or add to a sentence so the anchor fits seamlessly.
+Rules:${brandedRule}
+- CRITICAL: DO NOT forcefully inject the anchor into a paragraph that discusses a completely unrelated topic (e.g., injecting an invoice tool into a social media paragraph). The underlying topic MUST be relevant so the transition is natural. If no paragraphs are relevant, pick the closest one but ensure the transition sentence bridges the topics logically, or do not force it if impossible.
 - You MUST ALWAYS return exactly 2 suggestions. Do NOT fail or return empty.
 - Suggestions MUST be from DIFFERENT articles (different URLs)
 Paragraphs:
@@ -518,27 +537,27 @@ function mentionstool(text) {
   return toolPatterns.some((re) => re.test(text));
 }
 
-async function scrapeAndScore(url, anchor, keywords) {
-  console.log(`[SCRAPE] Fetching: ${url}`);
+async function scrapeAndScore(url, anchor, keywords, isBranded = false) {
+  console.log(`[SCRAPE] Fetching ${url}`);
   try {
-    const { html, status } = await fetchWithRetry(url);
-    if (isBlockedPage(html, status)) { console.log(`[SCRAPE] Blocked: ${url}`); return []; }
+    const { html, status } = await fetchWithRetry(url, 2, 18000);
+    if (isBlockedPage(html, status)) { console.log(`[SCRAPE] ${url} is blocked or captcha`); return []; }
     const article = extractArticleContent(html, url);
-    if (!article) return [];
-    const rawParagraphs = segmentParagraphs(article.content);
-    const seen = new Set();
+    if (!article) { console.log(`[SCRAPE] No readable content at ${url}`); return []; }
+    const rawParagraphs = segmentParagraphs(article.textContent);
     const scored = [];
+    const seen = new Set();
     for (const { text, linkCount } of rawParagraphs) {
       if (seen.has(text)) continue;
       if (!isQualityParagraph(text, linkCount)) continue;
       seen.add(text);
       const id = crypto.createHash('md5').update(url + text).digest('hex').slice(0, 10);
-      scored.push({ id, text, score: scoreParagraph(text, anchor, keywords), url });
+      scored.push({ id, text, score: scoreParagraph(text, anchor, keywords, isBranded), url });
     }
     console.log(`[SCRAPE] ${scored.length} quality paragraphs from ${url}`);
     return scored;
   } catch (err) {
-    console.log(`[SCRAPE] Failed for ${url}: ${err.message}`);
+    console.log(`[SCRAPE] Failed ${url}: ${err.message}`);
     return [];
   }
 }
@@ -546,10 +565,10 @@ async function scrapeAndScore(url, anchor, keywords) {
 // In-memory store for scraped paragraph pools (for regenerate without re-scraping)
 const paragraphPoolCache = new NodeCache({ stdTTL: 1800, checkperiod: 300, maxKeys: 200 });
 
-async function runAnalysis(domain, anchor, linkto, excludedParagraphs = []) {
-  console.log(`[ANALYZE] domain=${domain}, anchor="${anchor}", excluded=${excludedParagraphs.length}`);
+async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBranded = false) {
+  console.log(`[ANALYZE] domain=${domain}, anchor="${anchor}", excluded=${excludedParagraphs.length}, isBranded=${isBranded}`);
 
-  const poolKey = `pool::${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}`;
+  const poolKey = `pool::${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${isBranded}`;
 
   let topParagraphs, allScored, filteredUrls, linktoInfo;
 
@@ -565,13 +584,13 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = []) {
     // STEP 1: Linkto page analysis -> AI keyword generation (sequential so AI gets context)
     const lt = await analyzeLinktoPage(linkto);
     linktoInfo = lt;
-    const keywords = await generateKeywordsWithAI(anchor, linkto, linktoInfo);
+    const keywords = await generateKeywordsWithAI(anchor, linkto, linktoInfo, isBranded);
     console.log(`[LINKTO] isToolPage=${linktoInfo.isToolPage}, keywords=${linktoInfo.keywords.slice(0, 5).join(", ")}`);
 
     const mergedKeywords = [...new Set([...keywords, ...linktoInfo.keywords])];
 
     // STEP 2: Search
-    const urls = await searchArticles(domain, anchor, mergedKeywords);
+    const urls = await searchArticles(domain, anchor, mergedKeywords, isBranded);
     if (!urls.length) throw new Error("No articles found. Try a different domain or anchor text.");
 
     let linktoDomain = "";
@@ -582,7 +601,7 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = []) {
     console.log(`[SEARCH] Using ${filteredUrls.length} articles: ${filteredUrls.join(", ")}`);
 
     // STEP 3: Parallel scrape
-    const scrapeResults = await Promise.allSettled(filteredUrls.map((url) => scrapeAndScore(url, anchor, mergedKeywords)));
+    const scrapeResults = await Promise.allSettled(filteredUrls.map((url) => scrapeAndScore(url, anchor, mergedKeywords, isBranded)));
     const paragraphsByUrl = {};
     for (const [i, result] of scrapeResults.entries()) {
       if (result.status === "fulfilled" && result.value.length > 0) paragraphsByUrl[filteredUrls[i]] = result.value;
@@ -625,9 +644,9 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = []) {
   diversePool.sort((a, b) => b.score - a.score);
 
   const sendToAI = diversePool.slice(0, 12);
-  console.log(`[RANK] Sending ${sendToAI.length} paragraphs to AI (from ${Object.keys(grouped).length} distinct URLs)`);
+  console.log(`[RANK] Sending ${sendToAI.length} paragraphs to AI (from ${Object.keys(grouped).length} distinct URLs, Branded Mode: ${isBranded})`);
 
-  const aiSuggestions = await analyzeWithAI(sendToAI, anchor, linkto, linktoInfo);
+  const aiSuggestions = await analyzeWithAI(sendToAI, anchor, linkto, linktoInfo, isBranded);
 
   const results = aiSuggestions.map((aiResult) => {
     const match = findBestMatch(aiResult.paragraph, allScored);
@@ -650,7 +669,7 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = []) {
 app.post("/api/analyze", async (req, res) => {
   const rawDomain = req.body.domain || "";
   const domain = rawDomain.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
-  const { anchor, altAnchor, linkto } = req.body;
+  const { anchor, altAnchor, linkto, isBranded } = req.body;
   const excludedParagraphs = Array.isArray(req.body.excludedParagraphs) ? req.body.excludedParagraphs : [];
 
   const validationError = validateInputs(domain, anchor, linkto);
@@ -660,7 +679,7 @@ app.post("/api/analyze", async (req, res) => {
   const excludeHash = excludedParagraphs.length > 0
     ? crypto.createHash("md5").update(excludedParagraphs.join("|")).digest("hex").slice(0, 16)
     : "0";
-  const cacheKey = `${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${excludeHash}`;
+  const cacheKey = `${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${excludeHash}::${isBranded}`;
 
   // Only use cache for fresh requests (no exclusions) — regenerate always runs fresh
   const useCache = excludedParagraphs.length === 0;
@@ -673,11 +692,11 @@ app.post("/api/analyze", async (req, res) => {
 
   const attemptAnalysis = async () => {
     try {
-      return await runAnalysis(domain, anchor, linkto, excludedParagraphs);
+      return await runAnalysis(domain, anchor, linkto, excludedParagraphs, isBranded);
     } catch (err) {
       if (altAnchor && excludedParagraphs.length === 0) {
         console.log(`[FALLBACK] Primary anchor failed: ${err.message}. Retrying with alternate anchor: "${altAnchor}"`);
-        return await runAnalysis(domain, altAnchor, linkto, excludedParagraphs);
+        return await runAnalysis(domain, altAnchor, linkto, excludedParagraphs, isBranded);
       }
       throw err;
     }

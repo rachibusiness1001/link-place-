@@ -484,13 +484,15 @@
   </header>
 
   <div class="tabs">
-    <button class="tab active" id="tab-single" onclick="switchTab('single')">Single URL</button>
+    <button class="tab active" id="tab-single" onclick="switchTab('single')">Normal Anchor</button>
+    <button class="tab" id="tab-branded" onclick="switchTab('branded')">Branded Anchor</button>
     <button class="tab" id="tab-bulk" onclick="switchTab('bulk')">Bulk CSV</button>
   </div>
 
   <!-- Single form -->
   <div id="single-section">
     <div class="form-card">
+      <div style="font-size: 14px; color: var(--text2); margin-bottom: 20px;">Use this mode when your anchor text is related to the article topic (e.g. "email marketing software").</div>
       <div class="field">
         <label>Domain (from page)</label>
         <div class="input-wrap">
@@ -533,13 +535,58 @@
     </div>
   </div>
 
+  <!-- Branded form -->
+  <div id="branded-section" style="display:none;">
+    <div class="form-card">
+      <div style="font-size: 14px; color: var(--text2); margin-bottom: 20px;">Use this mode when your anchor text is a <strong>brand or company name</strong> (e.g. "HubSpot"). The AI will search for articles matching the <em>topic</em> of your Destination URL and insert the brand name naturally.</div>
+      <div class="field">
+        <label>Domain (from page)</label>
+        <div class="input-wrap">
+          <span class="input-icon">@</span>
+          <input type="text" id="domain-branded" placeholder="xyz.com" autocomplete="off" />
+        </div>
+        <div class="field-hint">Domain only — no need for https://</div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Branded Anchor</label>
+          <div class="input-wrap">
+            <span class="input-icon">#</span>
+            <input type="text" id="anchor-branded" placeholder="Zentago" />
+          </div>
+        </div>
+        <div class="field">
+          <label>Link to (destination URL)</label>
+          <div class="input-wrap">
+            <span class="input-icon">→</span>
+            <input type="text" id="linkto-branded" placeholder="https://zentago.com/invoice-tools" />
+          </div>
+        </div>
+      </div>
+
+      <div class="field" style="margin-top: 16px;">
+        <label>Alternate Branded Anchor (Optional)</label>
+        <div class="input-wrap">
+          <span class="input-icon">#</span>
+          <input type="text" id="altAnchor-branded" placeholder="Zentago Invoicing" />
+        </div>
+      </div>
+
+      <button class="btn-primary" id="analyze-btn-branded" onclick="analyze(true)">
+        Find Branded Placement ↗
+      </button>
+      <div class="error-box" id="error-box-branded"></div>
+    </div>
+  </div>
+
   <!-- Bulk section -->
   <div id="bulk-section" style="display:none;">
     <div class="form-card">
       <div class="bulk-placeholder">
         <div style="font-size:32px;">🚧</div>
         <p>Bulk CSV mode — <strong style="color:var(--text2)">coming soon!</strong></p>
-        <p style="margin-top:6px;">Use single mode for now.</p>
+        <p style="margin-top:6px;">Use normal mode for now.</p>
       </div>
     </div>
   </div>
@@ -666,14 +713,18 @@ let _excludedParagraphs = []; // Track paragraphs already shown to user
 let _editPlainText = [null, null]; // Plain text for copy buttons
 let _lastSuccessfulResult = null; // Store for CSV export
 let _lastInputs = null; // Store for CSV export
+let _isBrandedMode = false;
 
 function switchTab(tab) {
   document.getElementById('tab-single').classList.toggle('active', tab === 'single');
+  document.getElementById('tab-branded').classList.toggle('active', tab === 'branded');
   document.getElementById('tab-bulk').classList.toggle('active', tab === 'bulk');
   document.getElementById('single-section').style.display = tab === 'single' ? 'block' : 'none';
+  document.getElementById('branded-section').style.display = tab === 'branded' ? 'block' : 'none';
   document.getElementById('bulk-section').style.display = tab === 'bulk' ? 'block' : 'none';
   document.getElementById('result-section').classList.remove('show');
   document.getElementById('loading-card').classList.remove('show');
+  _isBrandedMode = tab === 'branded';
 }
 
 function startLoading() {
@@ -750,33 +801,34 @@ function renderSuggestion(s, idx, anchor) {
   card.style.display = 'block';
 }
 
-async function callAPI(domain, anchor, altAnchor, linkto, excludedParagraphs) {
+async function callAPI(domain, anchor, altAnchor, linkto, excludedParagraphs, isBranded) {
   const res = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ domain, anchor, altAnchor, linkto, excludedParagraphs })
+    body: JSON.stringify({ domain, anchor, altAnchor, linkto, excludedParagraphs, isBranded })
   });
   const result = await res.json();
   if (!res.ok) throw new Error(result.error || 'Something went wrong');
   return result;
 }
 
-async function analyze() {
+async function analyze(brandedFlag = false) {
   // Reset excluded paragraphs on fresh analyze
   _excludedParagraphs = [];
-  await runAnalysis();
+  await runAnalysis(false, brandedFlag);
 }
 
 async function regenerate() {
-  await runAnalysis(true);
+  await runAnalysis(true, _isBrandedMode);
 }
 
-async function runAnalysis(isRegenerate = false) {
-  const domain = document.getElementById('domain').value.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
-  const anchor = document.getElementById('anchor').value.trim();
-  const altAnchor = document.getElementById('altAnchor').value.trim();
-  const linkto = document.getElementById('linkto').value.trim();
-  const errBox = document.getElementById('error-box');
+async function runAnalysis(isRegenerate = false, brandedFlag = false) {
+  const suffix = brandedFlag ? '-branded' : '';
+  const domain = document.getElementById('domain' + suffix).value.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const anchor = document.getElementById('anchor' + suffix).value.trim();
+  const altAnchor = document.getElementById('altAnchor' + suffix).value.trim();
+  const linkto = document.getElementById('linkto' + suffix).value.trim();
+  const errBox = document.getElementById('error-box' + suffix);
   errBox.classList.remove('show');
 
   if (!domain || !anchor || !linkto) {
@@ -785,7 +837,7 @@ async function runAnalysis(isRegenerate = false) {
     return;
   }
 
-  const btn = document.getElementById('analyze-btn');
+  const btn = document.getElementById('analyze-btn' + suffix);
   const regenBtn = document.getElementById('regenerate-btn');
   btn.disabled = true;
   btn.textContent = 'Analyzing...';
@@ -800,7 +852,7 @@ async function runAnalysis(isRegenerate = false) {
   startLoading();
 
   try {
-    const result = await callAPI(domain, anchor, altAnchor, linkto, _excludedParagraphs);
+    const result = await callAPI(domain, anchor, altAnchor, linkto, _excludedParagraphs, brandedFlag);
     stopLoading();
 
     const suggestions = result.suggestions || [];
@@ -826,12 +878,12 @@ async function runAnalysis(isRegenerate = false) {
   } catch (err) {
     stopLoading();
     document.getElementById('loading-card').classList.remove('show');
-    document.getElementById('error-box').textContent = 'Error: ' + (err.message || 'Something went wrong. Please try again.');
-    document.getElementById('error-box').classList.add('show');
+    document.getElementById('error-box' + suffix).textContent = 'Error: ' + (err.message || 'Something went wrong. Please try again.');
+    document.getElementById('error-box' + suffix).classList.add('show');
   }
 
   btn.disabled = false;
-  btn.textContent = 'Find Best Placement ↗';
+  btn.textContent = brandedFlag ? 'Find Branded Placement ↗' : 'Find Best Placement ↗';
   if (regenBtn) regenBtn.disabled = false;
 }
 
