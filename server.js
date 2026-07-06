@@ -544,7 +544,7 @@ async function scrapeAndScore(url, anchor, keywords, isBranded = false) {
     if (isBlockedPage(html, status)) { console.log(`[SCRAPE] ${url} is blocked or captcha`); return []; }
     const article = extractArticleContent(html, url);
     if (!article) { console.log(`[SCRAPE] No readable content at ${url}`); return []; }
-    const rawParagraphs = segmentParagraphs(article.textContent);
+    const rawParagraphs = segmentParagraphs(article.content);
     const scored = [];
     const seen = new Set();
     for (const { text, linkCount } of rawParagraphs) {
