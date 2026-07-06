@@ -320,7 +320,7 @@ function segmentParagraphs(articleHtml) {
     doc.querySelectorAll("p, li, blockquote").forEach((el) => {
       const text = el.textContent.replace(/\s+/g, " ").trim();
       const linkCount = el.querySelectorAll("a").length;
-      if (text.length >= 120 && linkCount <= 3) paragraphs.push({ text, linkCount });
+      if (text.length >= 50 && linkCount <= 3) paragraphs.push({ text, linkCount });
     });
     return paragraphs;
   } catch (err) {
@@ -340,11 +340,9 @@ const NOISE_PATTERNS = [
 ];
 
 function isQualityParagraph(text, linkCount) {
-  if (text.length < 120) return false;
+  if (text.length < 50) return false;
   if (linkCount > 0) return false; // Skip paragraphs that already have any link
   for (const pattern of NOISE_PATTERNS) { if (pattern.test(text)) return false; }
-  const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 20);
-  if (sentences.length < 2) return false;
   const capsRatio = (text.match(/[A-Z]/g) || []).length / text.length;
   if (capsRatio > 0.25) return false;
   return true;
