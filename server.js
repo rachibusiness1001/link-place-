@@ -317,7 +317,7 @@ function segmentParagraphs(articleHtml) {
     const dom = new JSDOM(articleHtml);
     const doc = dom.window.document;
     const paragraphs = [];
-    doc.querySelectorAll("p, li, blockquote").forEach((el) => {
+    doc.querySelectorAll("p, li, blockquote, h2, h3, h4").forEach((el) => {
       const text = el.textContent.replace(/\s+/g, " ").trim();
       const linkCount = el.querySelectorAll("a").length;
       if (text.length >= 50 && linkCount <= 3) paragraphs.push({ text, linkCount });
@@ -539,7 +539,7 @@ async function scrapeAndScore(url, anchor, keywords, isBranded = false) {
   console.log(`[SCRAPE] Fetching ${url}`);
   try {
     const { html, status } = await fetchWithRetry(url, 2, 18000);
-    if (isBlockedPage(html, status)) { console.log(`[SCRAPE] ${url} is blocked or captcha`); return []; }
+    if (isBlockedPage(html, status)) { console.log(`[SCRAPE] ${url} is blocked or captcha`); return "BLOCKED"; }
     const article = extractArticleContent(html, url);
     if (!article) { console.log(`[SCRAPE] No readable content at ${url}`); return []; }
     const rawParagraphs = segmentParagraphs(article.content);
@@ -601,10 +601,24 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
     // STEP 3: Parallel scrape
     const scrapeResults = await Promise.allSettled(filteredUrls.map((url) => scrapeAndScore(url, anchor, mergedKeywords, isBranded)));
     const paragraphsByUrl = {};
+    let totalQuality = 0;
+    let blockedCount = 0;
     for (const [i, result] of scrapeResults.entries()) {
-      if (result.status === "fulfilled" && result.value.length > 0) paragraphsByUrl[filteredUrls[i]] = result.value;
+      if (result.status === "fulfilled") {
+        if (result.value === "BLOCKED") {
+          blockedCount++;
+        } else if (result.value.length > 0) {
+          paragraphsByUrl[filteredUrls[i]] = result.value;
+          totalQuality += result.value.length;
+        }
+      }
     }
-    if (!Object.keys(paragraphsByUrl).length) throw new Error("No suitable paragraphs found. Try a different domain.");
+    if (!Object.keys(paragraphsByUrl).length) {
+      if (blockedCount > 0) {
+        throw new Error(`The target website (${domain}) is blocking our scraper (Cloudflare/Bot protection). Out of ${filteredUrls.length} URLs, ${blockedCount} were blocked. We cannot scrape this site.`);
+      }
+      throw new Error(`No suitable paragraphs found (urls: ${filteredUrls.length}, scraped quality paras: ${totalQuality}). The articles might have no text, or all paragraphs contain existing links (which we skip). Try a different domain.`);
+    }
 
     // STEP 4: Context re-ranking — keep larger pool for regenerate
     allScored = rerankWithContext(paragraphsByUrl, anchor, mergedKeywords);
