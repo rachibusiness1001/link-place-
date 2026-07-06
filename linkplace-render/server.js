@@ -81,6 +81,8 @@ function isArticleUrl(url) {
     // Must be a blog/article path — not a landing page
     const lowerPath = urlPath.toLowerCase();
     const isBlogPath = BLOG_PATH_INDICATORS.some((indicator) => lowerPath.includes(indicator));
+    if (!isBlogPath) return false; // STRICT RULE: Must be inside a blog section
+
     // Reject index/listing pages — must have a meaningful slug after the blog segment
     // e.g. /blogs/ alone or /blogs/blog*home*2 are index pages
     const blogSegIdx = segments.findIndex((s) =>
@@ -300,9 +302,13 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
 function extractArticleContent(html, url) {
   try {
     const dom = new JSDOM(html, { url });
-    const reader = new Readability(dom.window.document, { keepClasses: false, nbTopCandidates: 5, charThreshold: 300 });
+    // Remove comment and reply sections before extraction
+    dom.window.document.querySelectorAll('[class*="comment"], [id*="comment"], [class*="reply"], [id*="reply"], [class*="disqus"], [id*="disqus"]').forEach((el) => {
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    });
+    const reader = new Readability(dom.window.document);
     const article = reader.parse();
-    if (!article || !article.textContent || article.textContent.length < 200) return null;
+    if (!article || !article.content || article.textContent.length < 200) return null;
     console.log(`[EXTRACT] ${article.textContent.length} chars, title: "${article.title?.slice(0, 60)}"`);
     return article;
   } catch (err) {
@@ -458,18 +464,26 @@ async function analyzeWithAI(paragraphs, anchor, linkto, linktoInfo, isBranded =
     : `Destination URL: ${linkto}`;
 
   const brandedRule = isBranded
-    ? "\n- BRANDED ANCHOR: The anchor is a brand/company name. The paragraph likely does not contain the brand name yet. Add a sentence naturally introducing the brand as a solution or example relevant to the topic discussed."
-    : "\n- Edit ONLY one sentence per paragraph — use [[ANCHOR]] placeholder. If the exact anchor doesn't perfectly fit, creatively rewrite or add to a sentence.";
+    ? "\n- BRANDED ANCHOR: The anchor is a brand/company name. You must evaluate the Destination page topic. If no paragraph perfectly matches, find the most related paragraph and APPEND or EDIT a sentence to seamlessly introduce the brand and its relevance to the topic."
+    : "\n- Edit ONLY one sentence per paragraph — use [[ANCHOR]] placeholder. If the exact anchor doesn't perfectly fit naturally, creatively rewrite or add to a sentence.";
 
-  const systemPrompt = `You are a senior SEO editor placing contextual internal links in blog articles. Your placements must read as if written by the original author. Never force links. Respond ONLY with valid JSON. No markdown, no backticks, no explanation outside JSON.`;
+  const systemPrompt = `You are an expert SEO editor placing contextual internal links in blog articles.
+Your goal is to seamlessly insert an anchor link into a paragraph so that it reads 100% naturally, as if written by the original author.
+Never force a link into an irrelevant context. If the paragraph is only slightly related, creatively edit the text or add a sentence to bridge the topics.
+Respond ONLY with valid JSON. No markdown, no backticks, no explanation outside JSON.`;
 
   const userPrompt = `Anchor text to place: "${anchor}"
 ${linktoBrief}
-Pick the TWO best paragraphs where inserting the anchor link feels completely natural.
+
+Analyze the paragraphs below. Pick the TWO best paragraphs from different articles where the anchor link can be placed organically.
 Rules:${brandedRule}
-- CRITICAL: DO NOT forcefully inject the anchor into a paragraph that discusses a completely unrelated topic (e.g., injecting an invoice tool into a social media paragraph). The underlying topic MUST be relevant so the transition is natural. If no paragraphs are relevant, pick the closest one but ensure the transition sentence bridges the topics logically, or do not force it if impossible.
+- TARGET URL ALIGNMENT: You must analyze the Destination page topic. The placement MUST make sense for a user to click and read that destination.
+- NATURAL PLACEMENT FIRST: Try to find a paragraph where the placement fits naturally. 
+- CREATIVE EDITING (FALLBACK): If a natural placement isn't immediately available, pick the most relevant paragraph and seamlessly edit the text or append a sentence to logically bridge the paragraph's topic with the destination URL.
+- CRITICAL: DO NOT forcefully inject the anchor into a paragraph that discusses a completely unrelated topic (e.g., injecting an invoice tool into a social media paragraph).
 - You MUST ALWAYS return exactly 2 suggestions. Do NOT fail or return empty.
 - Suggestions MUST be from DIFFERENT articles (different URLs)
+
 Paragraphs:
 ${paragraphText}
 Return this exact JSON with two suggestions:
@@ -542,6 +556,19 @@ async function scrapeAndScore(url, anchor, keywords, isBranded = false) {
     if (isBlockedPage(html, status)) { console.log(`[SCRAPE] ${url} is blocked or captcha`); return "BLOCKED"; }
     const article = extractArticleContent(html, url);
     if (!article) { console.log(`[SCRAPE] No readable content at ${url}`); return []; }
+    
+    // RULE 2: Reject if the blog is a tool review or roundup
+    const toolReviewPatterns = /\b(review|top 10|top \d+|best|vs|alternative|alternatives|pricing|software|app|platform)\b/i;
+    if (article.title && toolReviewPatterns.test(article.title)) {
+      console.log(`[SCRAPE] Rejected tool review page: ${article.title}`);
+      return [];
+    }
+    const urlSlug = new URL(url).pathname.split('/').filter(Boolean).pop() || "";
+    if (toolReviewPatterns.test(urlSlug.replace(/-/g, " "))) {
+      console.log(`[SCRAPE] Rejected tool review url: ${url}`);
+      return [];
+    }
+
     const rawParagraphs = segmentParagraphs(article.content);
     const scored = [];
     const seen = new Set();
