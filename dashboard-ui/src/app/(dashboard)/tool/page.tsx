@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link as LinkIcon, FileText, Anchor, Sparkles, Globe, CheckCircle2, Circle, AlertCircle, Download } from 'lucide-react';
+import { Link as LinkIcon, FileText, Anchor, Sparkles, Globe, CheckCircle2, Circle, AlertCircle, Download, BookMarked, Plus, FolderOpen } from 'lucide-react';
+import { useAppStore } from '@/store/useAppStore';
 
 const LOADING_STEPS = [
   "Generating semantic keywords...",
@@ -14,7 +15,6 @@ const LOADING_STEPS = [
 ];
 
 export default function ToolPage() {
-  const [activeTab, setActiveTab] = useState('single');
   const [isSearching, setIsSearching] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
 
@@ -25,6 +25,36 @@ export default function ToolPage() {
   
   const [results, setResults] = useState<any[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Project management
+  const { projects, addProject, savePlacement } = useAppStore();
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [savedIds, setSavedIds] = useState<Set<number>>(new Set());
+
+  const handleCreateProject = () => {
+    if (!newProjectName.trim()) return;
+    const p = addProject(newProjectName.trim());
+    setSelectedProjectId(p.id);
+    setNewProjectName('');
+    setShowNewProject(false);
+  };
+
+  const handleSavePlacement = (res: any, idx: number) => {
+    if (!selectedProjectId) return;
+    savePlacement({
+      projectId: selectedProjectId,
+      domain,
+      articleUrl: res.article_url,
+      anchor,
+      targetUrl: linkto,
+      suggestedEdit: res.suggested_edit,
+      relevanceScore: res.relevance_score,
+      isBranded: false,
+    });
+    setSavedIds((prev) => new Set(prev).add(idx));
+  };
 
   const handleSearch = async () => {
     if (!domain || !anchor || !linkto) {
@@ -164,6 +194,51 @@ export default function ToolPage() {
               exit={{ opacity: 0 }}
               className="space-y-6"
             >
+              {/* Project Selector */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">Save to Project</label>
+                {showNewProject ? (
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 flex items-center gap-2 bg-[#0a0a0a] border border-violet-500/30 rounded-lg px-3 py-2">
+                      <FolderOpen className="w-4 h-4 text-violet-400 shrink-0" />
+                      <input
+                        autoFocus
+                        type="text"
+                        value={newProjectName}
+                        onChange={(e) => setNewProjectName(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
+                        placeholder="Project name..."
+                        className="flex-1 bg-transparent text-sm text-zinc-300 outline-none placeholder:text-zinc-600"
+                      />
+                    </div>
+                    <button onClick={handleCreateProject} className="px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-colors">Create</button>
+                    <button onClick={() => setShowNewProject(false)} className="px-3 py-2 rounded-lg bg-white/5 text-zinc-400 text-sm transition-colors">Cancel</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <FolderOpen className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                      <select
+                        value={selectedProjectId}
+                        onChange={(e) => setSelectedProjectId(e.target.value)}
+                        className="w-full bg-[#0a0a0a] border border-white/5 rounded-lg py-2.5 pl-10 pr-4 text-sm text-zinc-300 focus:outline-none focus:border-white/10 appearance-none transition-all"
+                      >
+                        <option value="">-- Select a project --</option>
+                        {projects.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      onClick={() => setShowNewProject(true)}
+                      className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white text-sm font-medium transition-colors border border-white/5"
+                    >
+                      <Plus className="w-4 h-4" />
+                      New
+                    </button>
+                  </div>
+                )}
+              </div>
               <div className="space-y-2">
                 <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">Target Domain</label>
                 <div className="relative flex items-center">
@@ -245,9 +320,26 @@ export default function ToolPage() {
                       <p className="text-zinc-300 text-sm leading-relaxed font-serif">
                         {res.suggested_edit}
                       </p>
-                      <a href={res.article_url} target="_blank" rel="noopener noreferrer" className="text-zinc-500 text-xs hover:text-white mt-4 inline-block transition-colors">
-                        View Article →
-                      </a>
+                      <div className="flex items-center justify-between mt-4">
+                        <a href={res.article_url} target="_blank" rel="noopener noreferrer" className="text-zinc-500 text-xs hover:text-white transition-colors">
+                          View Article →
+                        </a>
+                        <button
+                          onClick={() => handleSavePlacement(res, idx)}
+                          disabled={savedIds.has(idx) || !selectedProjectId}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                            savedIds.has(idx)
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 cursor-default'
+                              : selectedProjectId
+                              ? 'bg-violet-600/20 hover:bg-violet-600/30 text-violet-400 border border-violet-500/20'
+                              : 'bg-white/5 text-zinc-600 border border-white/5 cursor-not-allowed'
+                          }`}
+                          title={!selectedProjectId ? 'Select a project first' : ''}
+                        >
+                          <BookMarked className="w-3.5 h-3.5" />
+                          {savedIds.has(idx) ? 'Saved!' : 'Save to Project'}
+                        </button>
+                      </div>
                     </div>
                   ))}
                   
