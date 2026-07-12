@@ -755,11 +755,11 @@ app.post("/api/analyze", async (req, res) => {
 
   const attemptAnalysis = async () => {
     try {
-      return await runAnalysis(domain, anchor, linkto, excludedParagraphs, isBranded);
+      return await runAnalysis(domain, anchor, linkto, excludedParagraphs, isBranded, req.body.debug);
     } catch (err) {
       if (altAnchor && excludedParagraphs.length === 0) {
         console.log(`[FALLBACK] Primary anchor failed: ${err.message}. Retrying with alternate anchor: "${altAnchor}"`);
-        return await runAnalysis(domain, altAnchor, linkto, excludedParagraphs, isBranded);
+        return await runAnalysis(domain, altAnchor, linkto, excludedParagraphs, isBranded, req.body.debug);
       }
       throw err;
     }
