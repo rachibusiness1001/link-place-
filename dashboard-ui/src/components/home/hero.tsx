@@ -22,8 +22,8 @@ export default function Hero() {
     <>
       <section className="relative overflow-hidden flex flex-col min-h-[80vh]">
         {/* HUGE BACKGROUND TEXT */}
-        <div className="absolute inset-0 flex items-end justify-center pointer-events-none select-none z-0 overflow-hidden pb-[15%] w-full">
-          <span className="text-[12vw] 2xl:text-[200px] font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-zinc-700/50 to-transparent whitespace-nowrap opacity-40 w-full text-center">
+        <div className="absolute bottom-0 left-0 right-0 flex justify-center pointer-events-none select-none z-0 overflow-hidden translate-y-[35%] w-full">
+          <span className="text-[12vw] 2xl:text-[200px] font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-zinc-600/60 to-transparent whitespace-nowrap opacity-50 w-full text-center">
             MY LINK PLACE
           </span>
         </div>
