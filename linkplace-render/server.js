@@ -274,6 +274,7 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
 
   const allUrls = new Set();
   const rawUrls = [];
+  let dataPreview = {};
   for (const query of queries) {
     if (allUrls.size >= 6) break;
     console.log(`[SEARCH] Query: ${query}`);
@@ -294,6 +295,7 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
       if (data.error) {
          throw new Error(`SerpAPI returned error: ${data.error}`);
       }
+      dataPreview = data;
       for (const r of (data?.organic_results || [])) {
         if (r.link) {
            rawUrls.push(r.link);
@@ -309,7 +311,7 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
 
   const urls = [...allUrls].slice(0, 6);
   console.log(`[SEARCH] Final URLs: ${urls.join(", ")}`);
-  return { urls, rawUrls };
+  return { urls, rawUrls, dataPreview };
 }
 
 function extractArticleContent(html, url) {
@@ -632,7 +634,7 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
     const urls = searchRes.urls;
     if (!urls.length) {
       if (debug) {
-         throw new Error(`DEBUG_EMPTY_URLS: RAW_URLS=${searchRes.rawUrls.join(', ')}`);
+         throw new Error(`DEBUG_EMPTY_URLS: RAW_URLS=${searchRes.rawUrls.join(', ')} | DATA_PREVIEW=${JSON.stringify(searchRes.dataPreview)}`);
       }
       throw new Error("No articles found. Try a different domain or anchor text.");
     }
