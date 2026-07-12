@@ -306,6 +306,7 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
       if (allUrls.size >= 4) break;
     } catch (err) {
       console.log(`[SEARCH] Query failed: ${err.message}`);
+      dataPreview = { lastError: err.message };
     }
   }
 
