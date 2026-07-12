@@ -21,12 +21,6 @@ export default function Hero() {
   return (
     <>
       <section className="relative overflow-hidden flex flex-col min-h-[80vh]">
-        {/* HUGE BACKGROUND TEXT */}
-        <div className="absolute bottom-0 left-0 right-0 flex justify-center pointer-events-none select-none z-0 overflow-hidden translate-y-[35%] w-full">
-          <span className="text-[12vw] 2xl:text-[200px] font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-zinc-600/60 to-transparent whitespace-nowrap opacity-50 w-full text-center">
-            MY LINK PLACE
-          </span>
-        </div>
 
         <div className="container mx-auto px-4 pt-32 pb-12 sm:pt-40 sm:pb-16 relative z-10 flex-1 flex flex-col">
           <div className="mx-auto max-w-4xl text-center flex-1 flex flex-col justify-center">
@@ -90,6 +84,12 @@ export default function Hero() {
               {/* Get started button */}
               <div className="flex items-center justify-center relative">
                 
+                {/* WATERMARK BEHIND BUTTON */}
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none select-none z-0">
+                  <span className="text-[12vw] 2xl:text-[200px] font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-zinc-600/60 to-transparent whitespace-nowrap opacity-50 text-center">
+                    MY LINK PLACE
+                  </span>
+                </div>
 
                 <a href="/docs/components/theme-toggle-animations">
                   <div className="group cursor-pointer border border-border bg-card gap-2 h-[60px] flex items-center p-[10px] rounded-full relative z-10">
