@@ -284,8 +284,15 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
         { signal: controller.signal }
       );
       clearTimeout(timer);
-      if (!res.ok) { console.log(`[SEARCH] SerpAPI ${res.status}`); continue; }
+      if (!res.ok) { 
+        const errText = await res.text();
+        console.log(`[SEARCH] SerpAPI ${res.status} - ${errText}`);
+        throw new Error(`SerpAPI error: ${res.status} ${errText}`);
+      }
       const data = await res.json();
+      if (data.error) {
+         throw new Error(`SerpAPI returned error: ${data.error}`);
+      }
       for (const r of (data?.organic_results || [])) {
         if (r.link && r.link.includes(domain) && isArticleUrl(r.link)) allUrls.add(r.link);
       }
@@ -752,7 +759,7 @@ app.post("/api/analyze", async (req, res) => {
     return res.status(200).json(response);
   } catch (err) {
     console.error(`[ERROR] ${err.stack || err.message}`);
-    const userFacing = err.message?.includes("No articles") || err.message?.includes("No suitable") || err.message?.includes("All found URLs")
+    const userFacing = err.message?.includes("No articles") || err.message?.includes("No suitable") || err.message?.includes("All found URLs") || err.message?.includes("SerpAPI")
       ? err.message : "Analysis failed. Please try again or use a different domain/anchor.";
     return res.status(500).json({ error: userFacing });
   }
