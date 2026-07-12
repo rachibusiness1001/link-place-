@@ -80,10 +80,10 @@ function isArticleUrl(url) {
     const meaningful = segments.filter((s) => !INDEX_SEGMENTS.has(s.toLowerCase()));
     if (meaningful.length === 0) return false;
     if (/^\d{4}$/.test(segments[segments.length - 1])) return false;
-    // Must be a blog/article path — not a landing page
+    // Relaxed rule: no longer requires a strict blog path indicator in the URL path.
+    // This allows root-level blogs (e.g. site.com/my-article) and subdomains (blog.site.com/my-article)
     const lowerPath = urlPath.toLowerCase();
-    const isBlogPath = BLOG_PATH_INDICATORS.some((indicator) => lowerPath.includes(indicator));
-    if (!isBlogPath) return false; // STRICT RULE: Must be inside a blog section
+    const isBlogPath = BLOG_PATH_INDICATORS.some((indicator) => lowerPath.includes(indicator)) || parsed.hostname.toLowerCase().includes('blog');
 
     // Reject index/listing pages — must have a meaningful slug after the blog segment
     // e.g. /blogs/ alone or /blogs/blog*home*2 are index pages
