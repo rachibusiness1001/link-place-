@@ -273,6 +273,7 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
   ];
 
   const allUrls = new Set();
+  const rawUrls = [];
   for (const query of queries) {
     if (allUrls.size >= 6) break;
     console.log(`[SEARCH] Query: ${query}`);
@@ -294,7 +295,10 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
          throw new Error(`SerpAPI returned error: ${data.error}`);
       }
       for (const r of (data?.organic_results || [])) {
-        if (r.link && r.link.includes(domain) && isArticleUrl(r.link)) allUrls.add(r.link);
+        if (r.link) {
+           rawUrls.push(r.link);
+           if (r.link.includes(domain) && isArticleUrl(r.link)) allUrls.add(r.link);
+        }
       }
       console.log(`[SEARCH] Total valid URLs so far: ${allUrls.size}`);
       if (allUrls.size >= 4) break;
@@ -305,7 +309,7 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
 
   const urls = [...allUrls].slice(0, 6);
   console.log(`[SEARCH] Final URLs: ${urls.join(", ")}`);
-  return urls;
+  return { urls, rawUrls };
 }
 
 function extractArticleContent(html, url) {
@@ -599,8 +603,8 @@ async function scrapeAndScore(url, anchor, keywords, isBranded = false) {
 // In-memory store for scraped paragraph pools (for regenerate without re-scraping)
 const paragraphPoolCache = new NodeCache({ stdTTL: 1800, checkperiod: 300, maxKeys: 200 });
 
-async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBranded = false) {
-  console.log(`[ANALYZE] domain=${domain}, anchor="${anchor}", excluded=${excludedParagraphs.length}, isBranded=${isBranded}`);
+async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBranded = false, debug = false) {
+  console.log(`[ANALYZE] domain=${domain}, anchor="${anchor}", excluded=${excludedParagraphs.length}, isBranded=${isBranded}, debug=${debug}`);
 
   const poolKey = `pool::${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${isBranded}`;
 
@@ -624,13 +628,24 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
     const mergedKeywords = [...new Set([...keywords, ...linktoInfo.keywords])];
 
     // STEP 2: Search
-    const urls = await searchArticles(domain, anchor, mergedKeywords, isBranded);
-    if (!urls.length) throw new Error("No articles found. Try a different domain or anchor text.");
+    const searchRes = await searchArticles(domain, anchor, mergedKeywords, isBranded);
+    const urls = searchRes.urls;
+    if (!urls.length) {
+      if (debug) {
+         throw new Error(`DEBUG_EMPTY_URLS: RAW_URLS=${searchRes.rawUrls.join(', ')}`);
+      }
+      throw new Error("No articles found. Try a different domain or anchor text.");
+    }
 
     let linktoDomain = "";
     try { linktoDomain = new URL(linkto).hostname.replace(/^www\./, ""); } catch {}
     filteredUrls = urls.filter((url) => !url.includes(linktoDomain));
-    if (!filteredUrls.length) throw new Error("All found URLs belong to the linkto domain.");
+    if (!filteredUrls.length) {
+      if (debug) {
+         throw new Error(`DEBUG_ALL_FILTERED: originalUrls=${urls.join(',')}`);
+      }
+      throw new Error("All found URLs belong to the linkto domain.");
+    }
 
     console.log(`[SEARCH] Using ${filteredUrls.length} articles: ${filteredUrls.join(", ")}`);
 
