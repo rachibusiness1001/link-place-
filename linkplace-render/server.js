@@ -3,6 +3,7 @@
  */
 "use strict";
 const express = require("express");
+const cors = require("cors");
 const path = require("path");
 const { JSDOM } = require("jsdom");
 const { Readability } = require("@mozilla/readability");
@@ -16,6 +17,7 @@ if (!process.env.ANTHROPIC_API_KEY || !process.env.SERPAPI_KEY) {
 }
 
 const app = express();
+app.use(cors());
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "50kb" }));
 app.use(express.static(path.join(__dirname, "public")));
