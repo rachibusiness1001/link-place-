@@ -774,7 +774,7 @@ app.post("/api/analyze", async (req, res) => {
     return res.status(200).json(response);
   } catch (err) {
     console.error(`[ERROR] ${err.stack || err.message}`);
-    const userFacing = err.message?.includes("No articles") || err.message?.includes("No suitable") || err.message?.includes("All found URLs") || err.message?.includes("SerpAPI")
+    const userFacing = err.message?.includes("No articles") || err.message?.includes("No suitable") || err.message?.includes("All found URLs") || err.message?.includes("SerpAPI") || err.message?.includes("DEBUG")
       ? err.message : "Analysis failed. Please try again or use a different domain/anchor.";
     return res.status(500).json({ error: userFacing });
   }
