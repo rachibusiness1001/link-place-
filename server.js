@@ -10,6 +10,8 @@ const NodeCache = require("node-cache");
 const rateLimit = require("express-rate-limit");
 const crypto = require("crypto");
 
+const cors = require("cors");
+
 if (!process.env.ANTHROPIC_API_KEY || !process.env.SERPAPI_KEY) {
   console.error("CRITICAL: Missing ANTHROPIC_API_KEY or SERPAPI_KEY in environment");
   process.exit(1);
@@ -17,6 +19,7 @@ if (!process.env.ANTHROPIC_API_KEY || !process.env.SERPAPI_KEY) {
 
 const app = express();
 app.set("trust proxy", 1);
+app.use(cors()); // Allow all origins since frontend is on Vercel
 app.use(express.json({ limit: "50kb" }));
 app.use(express.static(path.join(__dirname, "public")));
 

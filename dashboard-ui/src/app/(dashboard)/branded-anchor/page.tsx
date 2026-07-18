@@ -72,7 +72,7 @@ export default function BrandedAnchorPage() {
     }, 2000);
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3000";
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://link-place-latest.onrender.com";
       const res = await fetch(`${backendUrl}/api/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
