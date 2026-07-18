@@ -3,7 +3,6 @@
  */
 "use strict";
 const express = require("express");
-const cors = require("cors");
 const path = require("path");
 const { JSDOM } = require("jsdom");
 const { Readability } = require("@mozilla/readability");
@@ -17,7 +16,6 @@ if (!process.env.ANTHROPIC_API_KEY || !process.env.SERPAPI_KEY) {
 }
 
 const app = express();
-app.use(cors());
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "50kb" }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -80,10 +78,10 @@ function isArticleUrl(url) {
     const meaningful = segments.filter((s) => !INDEX_SEGMENTS.has(s.toLowerCase()));
     if (meaningful.length === 0) return false;
     if (/^\d{4}$/.test(segments[segments.length - 1])) return false;
-    // Relaxed rule: no longer requires a strict blog path indicator in the URL path.
-    // This allows root-level blogs (e.g. site.com/my-article) and subdomains (blog.site.com/my-article)
+    // Must be a blog/article path — not a landing page
     const lowerPath = urlPath.toLowerCase();
-    const isBlogPath = BLOG_PATH_INDICATORS.some((indicator) => lowerPath.includes(indicator)) || parsed.hostname.toLowerCase().includes('blog');
+    const isBlogPath = BLOG_PATH_INDICATORS.some((indicator) => lowerPath.includes(indicator));
+    if (!isBlogPath) return false; // STRICT RULE: Must be inside a blog section
 
     // Reject index/listing pages — must have a meaningful slug after the blog segment
     // e.g. /blogs/ alone or /blogs/blog*home*2 are index pages
@@ -273,8 +271,6 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
   ];
 
   const allUrls = new Set();
-  const rawUrls = [];
-  let dataPreview = {};
   for (const query of queries) {
     if (allUrls.size >= 6) break;
     console.log(`[SEARCH] Query: ${query}`);
@@ -286,33 +282,21 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
         { signal: controller.signal }
       );
       clearTimeout(timer);
-      if (!res.ok) { 
-        const errText = await res.text();
-        console.log(`[SEARCH] SerpAPI ${res.status} - ${errText}`);
-        throw new Error(`SerpAPI error: ${res.status} ${errText}`);
-      }
+      if (!res.ok) { console.log(`[SEARCH] SerpAPI ${res.status}`); continue; }
       const data = await res.json();
-      if (data.error) {
-         throw new Error(`SerpAPI returned error: ${data.error}`);
-      }
-      dataPreview = data;
       for (const r of (data?.organic_results || [])) {
-        if (r.link) {
-           rawUrls.push(r.link);
-           if (r.link.includes(domain) && isArticleUrl(r.link)) allUrls.add(r.link);
-        }
+        if (r.link && r.link.includes(domain) && isArticleUrl(r.link)) allUrls.add(r.link);
       }
       console.log(`[SEARCH] Total valid URLs so far: ${allUrls.size}`);
       if (allUrls.size >= 4) break;
     } catch (err) {
       console.log(`[SEARCH] Query failed: ${err.message}`);
-      dataPreview = { lastError: err.message };
     }
   }
 
   const urls = [...allUrls].slice(0, 6);
   console.log(`[SEARCH] Final URLs: ${urls.join(", ")}`);
-  return { urls, rawUrls, dataPreview };
+  return urls;
 }
 
 function extractArticleContent(html, url) {
@@ -606,8 +590,8 @@ async function scrapeAndScore(url, anchor, keywords, isBranded = false) {
 // In-memory store for scraped paragraph pools (for regenerate without re-scraping)
 const paragraphPoolCache = new NodeCache({ stdTTL: 1800, checkperiod: 300, maxKeys: 200 });
 
-async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBranded = false, debug = false) {
-  console.log(`[ANALYZE] domain=${domain}, anchor="${anchor}", excluded=${excludedParagraphs.length}, isBranded=${isBranded}, debug=${debug}`);
+async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBranded = false) {
+  console.log(`[ANALYZE] domain=${domain}, anchor="${anchor}", excluded=${excludedParagraphs.length}, isBranded=${isBranded}`);
 
   const poolKey = `pool::${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${isBranded}`;
 
@@ -631,24 +615,13 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
     const mergedKeywords = [...new Set([...keywords, ...linktoInfo.keywords])];
 
     // STEP 2: Search
-    const searchRes = await searchArticles(domain, anchor, mergedKeywords, isBranded);
-    const urls = searchRes.urls;
-    if (!urls.length) {
-      if (debug) {
-         throw new Error(`DEBUG_EMPTY_URLS: RAW_URLS=${searchRes.rawUrls.join(', ')} | DATA_PREVIEW=${JSON.stringify(searchRes.dataPreview)}`);
-      }
-      throw new Error("No articles found. Try a different domain or anchor text.");
-    }
+    const urls = await searchArticles(domain, anchor, mergedKeywords, isBranded);
+    if (!urls.length) throw new Error("No articles found. Try a different domain or anchor text.");
 
     let linktoDomain = "";
     try { linktoDomain = new URL(linkto).hostname.replace(/^www\./, ""); } catch {}
     filteredUrls = urls.filter((url) => !url.includes(linktoDomain));
-    if (!filteredUrls.length) {
-      if (debug) {
-         throw new Error(`DEBUG_ALL_FILTERED: originalUrls=${urls.join(',')}`);
-      }
-      throw new Error("All found URLs belong to the linkto domain.");
-    }
+    if (!filteredUrls.length) throw new Error("All found URLs belong to the linkto domain.");
 
     console.log(`[SEARCH] Using ${filteredUrls.length} articles: ${filteredUrls.join(", ")}`);
 
@@ -732,6 +705,159 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
   return results;
 }
 
+// ─── /api/find-anchor — Zero-cost anchor finder (no external APIs) ──────────
+// Crawls a website's sitemap/RSS to find all articles mentioning an anchor text
+app.post("/api/find-anchor", async (req, res) => {
+  const { websiteUrl, anchorText } = req.body;
+
+  if (!websiteUrl || !anchorText) {
+    return res.status(400).json({ error: "websiteUrl and anchorText are required" });
+  }
+  if (anchorText.length < 2) return res.status(400).json({ error: "anchorText too short" });
+
+  let baseUrl = "";
+  try {
+    const parsed = new URL(websiteUrl.startsWith("http") ? websiteUrl : "https://" + websiteUrl);
+    baseUrl = `${parsed.protocol}//${parsed.hostname}`;
+  } catch {
+    return res.status(400).json({ error: "Invalid website URL" });
+  }
+
+  const anchorLower = anchorText.toLowerCase().trim();
+  const foundArticles = [];
+  const checkedUrls = new Set();
+
+  // Helper: fetch a URL silently
+  async function silentFetch(url, timeoutMs = 12000) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const r = await fetch(url, { headers: DEFAULT_HEADERS, signal: controller.signal, redirect: "follow" });
+      clearTimeout(timer);
+      return { html: await r.text(), ok: r.ok };
+    } catch { return { html: "", ok: false }; }
+  }
+
+  // Step 1: Try to get URLs from sitemap.xml or sitemap_index.xml or robots.txt
+  const sitemapUrls = [];
+  const sitemapCandidates = [
+    `${baseUrl}/sitemap.xml`,
+    `${baseUrl}/sitemap_index.xml`,
+    `${baseUrl}/sitemap-posts.xml`,
+    `${baseUrl}/blog-sitemap.xml`,
+    `${baseUrl}/post-sitemap.xml`,
+    `${baseUrl}/rss.xml`,
+    `${baseUrl}/feed`,
+    `${baseUrl}/feed.xml`,
+  ];
+
+  for (const sitemapUrl of sitemapCandidates) {
+    if (sitemapUrls.length >= 100) break;
+    const { html, ok } = await silentFetch(sitemapUrl, 10000);
+    if (!ok || !html) continue;
+
+    // Parse XML sitemap
+    if (html.includes("<url>") || html.includes("<loc>")) {
+      const locMatches = html.match(/<loc>(.*?)<\/loc>/g) || [];
+      for (const m of locMatches) {
+        const url = m.replace(/<\/?loc>/g, "").trim();
+        if (url && url.startsWith("http") && isArticleUrl(url)) {
+          sitemapUrls.push(url);
+        }
+        // Nested sitemap index
+        if (url && url.includes("sitemap") && url.endsWith(".xml") && sitemapUrls.length < 50) {
+          const nested = await silentFetch(url, 8000);
+          if (nested.ok) {
+            const nestedLocs = nested.html.match(/<loc>(.*?)<\/loc>/g) || [];
+            for (const nl of nestedLocs) {
+              const nUrl = nl.replace(/<\/?loc>/g, "").trim();
+              if (nUrl && nUrl.startsWith("http") && isArticleUrl(nUrl)) sitemapUrls.push(nUrl);
+            }
+          }
+        }
+      }
+      if (sitemapUrls.length > 0) break;
+    }
+
+    // Parse RSS feed
+    if (html.includes("<item>") || html.includes("<entry>")) {
+      const linkMatches = html.match(/<link>(.*?)<\/link>/g) || [];
+      const guidMatches = html.match(/<guid[^>]*>(.*?)<\/guid>/g) || [];
+      const atomLinks = html.match(/href="([^"]+)"/g) || [];
+      for (const m of [...linkMatches, ...guidMatches]) {
+        const url = m.replace(/<[^>]+>/g, "").trim();
+        if (url && url.startsWith("http") && isArticleUrl(url)) sitemapUrls.push(url);
+      }
+      if (sitemapUrls.length > 0) break;
+    }
+  }
+
+  // Step 2: If sitemap failed, try crawling the homepage for article links
+  if (sitemapUrls.length === 0) {
+    const { html: homeHtml } = await silentFetch(baseUrl, 10000);
+    if (homeHtml) {
+      const hrefMatches = homeHtml.match(/href="([^"#?]+)"/g) || [];
+      for (const m of hrefMatches) {
+        const href = m.replace(/href="|"/g, "").trim();
+        let fullUrl = href;
+        if (href.startsWith("/")) fullUrl = baseUrl + href;
+        if (!fullUrl.startsWith("http")) continue;
+        if (isArticleUrl(fullUrl)) sitemapUrls.push(fullUrl);
+      }
+    }
+  }
+
+  if (sitemapUrls.length === 0) {
+    return res.status(404).json({ error: "Could not find any articles on this website. Make sure the URL is correct and the site has a sitemap or RSS feed." });
+  }
+
+  // Deduplicate and limit
+  const uniqueUrls = [...new Set(sitemapUrls)].slice(0, 120);
+  console.log(`[FIND-ANCHOR] Checking ${uniqueUrls.length} URLs for anchor: "${anchorText}"`);
+
+  // Step 3: Check each article for anchor text (parallel, batched)
+  const BATCH_SIZE = 8;
+  for (let i = 0; i < uniqueUrls.length; i += BATCH_SIZE) {
+    const batch = uniqueUrls.slice(i, i + BATCH_SIZE);
+    await Promise.allSettled(batch.map(async (url) => {
+      if (checkedUrls.has(url)) return;
+      checkedUrls.add(url);
+      const { html, ok } = await silentFetch(url, 10000);
+      if (!ok || !html) return;
+      // Use Readability for clean text
+      try {
+        const dom = new JSDOM(html, { url });
+        const reader = new Readability(dom.window.document);
+        const article = reader.parse();
+        if (!article || !article.textContent) return;
+        const textLower = article.textContent.toLowerCase();
+        if (textLower.includes(anchorLower)) {
+          // Find surrounding context (50 chars before and after)
+          const idx = textLower.indexOf(anchorLower);
+          const start = Math.max(0, idx - 80);
+          const end = Math.min(article.textContent.length, idx + anchorLower.length + 80);
+          const context = "..." + article.textContent.slice(start, end).replace(/\s+/g, " ").trim() + "...";
+          foundArticles.push({
+            url,
+            title: article.title || url,
+            context,
+          });
+        }
+      } catch { /* skip */ }
+    }));
+  }
+
+  console.log(`[FIND-ANCHOR] Found ${foundArticles.length} articles with anchor "${anchorText}" out of ${checkedUrls.size} checked`);
+
+  return res.status(200).json({
+    anchorText,
+    websiteUrl: baseUrl,
+    totalChecked: checkedUrls.size,
+    totalFound: foundArticles.length,
+    articles: foundArticles,
+  });
+});
+
 app.post("/api/analyze", async (req, res) => {
   const rawDomain = req.body.domain || "";
   const domain = rawDomain.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
@@ -758,11 +884,11 @@ app.post("/api/analyze", async (req, res) => {
 
   const attemptAnalysis = async () => {
     try {
-      return await runAnalysis(domain, anchor, linkto, excludedParagraphs, isBranded, req.body.debug);
+      return await runAnalysis(domain, anchor, linkto, excludedParagraphs, isBranded);
     } catch (err) {
       if (altAnchor && excludedParagraphs.length === 0) {
         console.log(`[FALLBACK] Primary anchor failed: ${err.message}. Retrying with alternate anchor: "${altAnchor}"`);
-        return await runAnalysis(domain, altAnchor, linkto, excludedParagraphs, isBranded, req.body.debug);
+        return await runAnalysis(domain, altAnchor, linkto, excludedParagraphs, isBranded);
       }
       throw err;
     }
@@ -777,7 +903,7 @@ app.post("/api/analyze", async (req, res) => {
     return res.status(200).json(response);
   } catch (err) {
     console.error(`[ERROR] ${err.stack || err.message}`);
-    const userFacing = err.message?.includes("No articles") || err.message?.includes("No suitable") || err.message?.includes("All found URLs") || err.message?.includes("SerpAPI") || err.message?.includes("DEBUG")
+    const userFacing = err.message?.includes("No articles") || err.message?.includes("No suitable") || err.message?.includes("All found URLs")
       ? err.message : "Analysis failed. Please try again or use a different domain/anchor.";
     return res.status(500).json({ error: userFacing });
   }
