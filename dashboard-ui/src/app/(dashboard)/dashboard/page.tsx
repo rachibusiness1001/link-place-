@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '@/store/useAppStore';
-import { RefreshCcw, Mail, Zap, Sparkles, MoveRight, ArrowUpRight } from 'lucide-react';
+import { RefreshCcw, Mail, Zap, Sparkles, MoveRight, ArrowUpRight, FolderOpen } from 'lucide-react';
 import Link from 'next/link';
 
 export default function Dashboard() {
@@ -58,7 +58,7 @@ export default function Dashboard() {
       </div>
 
       {/* Secondary Action Cards */}
-      <div className="grid grid-cols-3 gap-4 mb-10">
+      <div className="grid grid-cols-2 gap-4 mb-10">
         
         <div className="bg-[#121212] border border-white/5 rounded-xl p-6 flex flex-col hover:border-white/10 transition-colors">
           <div className="flex items-center justify-between mb-4">
@@ -99,6 +99,20 @@ export default function Dashboard() {
           </p>
           <Link href="/branded-anchor" className="text-[#20c997] text-sm font-semibold flex items-center gap-2 hover:gap-3 transition-all self-end">
             Branded Anchor <MoveRight className="w-4 h-4" />
+          </Link>
+        </div>
+
+        <div className="bg-[#121212] border border-white/5 rounded-xl p-6 flex flex-col hover:border-white/10 transition-colors">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-[10px] font-bold tracking-[0.15em] text-[#8b5cf6] uppercase">Organization</span>
+            <FolderOpen className="w-4 h-4 text-[#8b5cf6]" />
+          </div>
+          <h3 className="text-white font-bold mb-2">Manage Projects</h3>
+          <p className="text-zinc-500 text-sm mb-6 flex-1">
+            Create new projects and organize your saved link placements efficiently in one place.
+          </p>
+          <Link href="/manage-placements" className="text-[#8b5cf6] text-sm font-semibold flex items-center gap-2 hover:gap-3 transition-all self-end">
+            Open Projects <MoveRight className="w-4 h-4" />
           </Link>
         </div>
 

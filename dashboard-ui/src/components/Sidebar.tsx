@@ -108,38 +108,7 @@ export default function Sidebar() {
           </nav>
         </div>
 
-        {/* Projects Menu */}
-        <div className="mb-6">
-          <div className="text-[10px] font-bold text-zinc-500/80 uppercase tracking-[0.15em] mb-2 px-6 flex items-center justify-between">
-            Your Projects <ChevronRight className="w-3 h-3" />
-          </div>
-          <nav className="space-y-0.5 px-3">
-            {projects.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-zinc-600 italic">No projects yet</div>
-            ) : (
-              projects.map((project) => {
-                const isActive = pathname === `/project/${project.id}`;
-                return (
-                  <Link key={project.id} href={`/project/${project.id}`} className="block relative">
-                    {isActive && (
-                      <motion.div
-                        layoutId="sidebar-project-active"
-                        className="absolute inset-0 bg-[#1e1b38] rounded-lg border border-[#3b327b]"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ type: "spring", stiffness: 400, damping: 35 }}
-                      />
-                    )}
-                    <div className={`relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm ${isActive ? 'text-white' : 'hover:bg-white/5 hover:text-white'}`}>
-                      <LinkIcon className={`w-4 h-4 ${isActive ? 'text-violet-400' : 'opacity-70 text-violet-400/50'}`} />
-                      <span className="font-medium truncate">{project.name}</span>
-                    </div>
-                  </Link>
-                );
-              })
-            )}
-          </nav>
-        </div>
+        {/* Removed Projects Menu as per user request */}
 
         {/* Resources Menu */}
         <div>
