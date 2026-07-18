@@ -845,7 +845,7 @@ app.post("/api/find-anchor", async (req, res) => {
 
   console.log(`[FIND-ANCHOR] Checking URLs starting at ${currentIndex} (Total: ${uniqueUrls.length}) for anchor: "${anchorText}"`);
 
-  while (currentIndex < uniqueUrls.length && foundArticles.length < limit) {
+  while (currentIndex < uniqueUrls.length && foundArticles.length < limit && scannedThisRound < 100) {
     const batch = uniqueUrls.slice(currentIndex, currentIndex + BATCH_SIZE);
     scannedThisRound += batch.length;
     
