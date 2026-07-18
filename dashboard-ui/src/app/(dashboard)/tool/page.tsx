@@ -98,14 +98,27 @@ export default function ToolPage() {
   const handleExportCSV = () => {
     if (!results || results.length === 0) return;
     
-    // Create CSV content
-    const headers = ['Domain', 'Article URL', 'Anchor Text', 'Target URL', 'Suggested Placement'];
+    const headers = [
+      'Domain',
+      'Article URL',
+      'Anchor Text',
+      'Target URL',
+      'Relevance Score',
+      'Natural Fit',
+      'Original Sentence',
+      'Suggested Placement',
+      'Why This Spot'
+    ];
     const rows = results.map((res: any) => [
       new URL(res.article_url).hostname,
       res.article_url,
       anchor,
       linkto,
-      `"${res.suggested_edit.replace(/"/g, '""')}"` // Escape quotes
+      res.relevance_score || '',
+      res.natural_fit || '',
+      `"${(res.suggested_sentence || '').replace(/"/g, '""')}"`,
+      `"${(res.suggested_edit || '').replace('[[ANCHOR]]', anchor).replace(/"/g, '""')}"`,
+      `"${(res.reason || '').replace(/"/g, '""')}"`
     ]);
     
     const csvContent = [

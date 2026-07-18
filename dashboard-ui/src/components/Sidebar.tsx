@@ -39,6 +39,7 @@ export default function Sidebar() {
     { name: 'Dashboard', href: '/dashboard', icon: Home },
     { name: 'Find Placement', href: '/tool', icon: Search },
     { name: 'Branded Anchor', href: '/branded-anchor', icon: Anchor },
+    { name: 'Find Anchor', href: '/find-anchor', icon: LinkIcon },
     { name: 'All Projects', href: '/manage-placements', icon: BookMarked },
     { name: 'Bulk Placements', href: '#', icon: FileText, comingSoon: true },
   ];

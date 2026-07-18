@@ -705,6 +705,159 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
   return results;
 }
 
+// ─── /api/find-anchor — Zero-cost anchor finder (no external APIs) ──────────
+// Crawls a website's sitemap/RSS to find all articles mentioning an anchor text
+app.post("/api/find-anchor", async (req, res) => {
+  const { websiteUrl, anchorText } = req.body;
+
+  if (!websiteUrl || !anchorText) {
+    return res.status(400).json({ error: "websiteUrl and anchorText are required" });
+  }
+  if (anchorText.length < 2) return res.status(400).json({ error: "anchorText too short" });
+
+  let baseUrl = "";
+  try {
+    const parsed = new URL(websiteUrl.startsWith("http") ? websiteUrl : "https://" + websiteUrl);
+    baseUrl = `${parsed.protocol}//${parsed.hostname}`;
+  } catch {
+    return res.status(400).json({ error: "Invalid website URL" });
+  }
+
+  const anchorLower = anchorText.toLowerCase().trim();
+  const foundArticles = [];
+  const checkedUrls = new Set();
+
+  // Helper: fetch a URL silently
+  async function silentFetch(url, timeoutMs = 12000) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const r = await fetch(url, { headers: DEFAULT_HEADERS, signal: controller.signal, redirect: "follow" });
+      clearTimeout(timer);
+      return { html: await r.text(), ok: r.ok };
+    } catch { return { html: "", ok: false }; }
+  }
+
+  // Step 1: Try to get URLs from sitemap.xml or sitemap_index.xml or robots.txt
+  const sitemapUrls = [];
+  const sitemapCandidates = [
+    `${baseUrl}/sitemap.xml`,
+    `${baseUrl}/sitemap_index.xml`,
+    `${baseUrl}/sitemap-posts.xml`,
+    `${baseUrl}/blog-sitemap.xml`,
+    `${baseUrl}/post-sitemap.xml`,
+    `${baseUrl}/rss.xml`,
+    `${baseUrl}/feed`,
+    `${baseUrl}/feed.xml`,
+  ];
+
+  for (const sitemapUrl of sitemapCandidates) {
+    if (sitemapUrls.length >= 100) break;
+    const { html, ok } = await silentFetch(sitemapUrl, 10000);
+    if (!ok || !html) continue;
+
+    // Parse XML sitemap
+    if (html.includes("<url>") || html.includes("<loc>")) {
+      const locMatches = html.match(/<loc>(.*?)<\/loc>/g) || [];
+      for (const m of locMatches) {
+        const url = m.replace(/<\/?loc>/g, "").trim();
+        if (url && url.startsWith("http") && isArticleUrl(url)) {
+          sitemapUrls.push(url);
+        }
+        // Nested sitemap index
+        if (url && url.includes("sitemap") && url.endsWith(".xml") && sitemapUrls.length < 50) {
+          const nested = await silentFetch(url, 8000);
+          if (nested.ok) {
+            const nestedLocs = nested.html.match(/<loc>(.*?)<\/loc>/g) || [];
+            for (const nl of nestedLocs) {
+              const nUrl = nl.replace(/<\/?loc>/g, "").trim();
+              if (nUrl && nUrl.startsWith("http") && isArticleUrl(nUrl)) sitemapUrls.push(nUrl);
+            }
+          }
+        }
+      }
+      if (sitemapUrls.length > 0) break;
+    }
+
+    // Parse RSS feed
+    if (html.includes("<item>") || html.includes("<entry>")) {
+      const linkMatches = html.match(/<link>(.*?)<\/link>/g) || [];
+      const guidMatches = html.match(/<guid[^>]*>(.*?)<\/guid>/g) || [];
+      const atomLinks = html.match(/href="([^"]+)"/g) || [];
+      for (const m of [...linkMatches, ...guidMatches]) {
+        const url = m.replace(/<[^>]+>/g, "").trim();
+        if (url && url.startsWith("http") && isArticleUrl(url)) sitemapUrls.push(url);
+      }
+      if (sitemapUrls.length > 0) break;
+    }
+  }
+
+  // Step 2: If sitemap failed, try crawling the homepage for article links
+  if (sitemapUrls.length === 0) {
+    const { html: homeHtml } = await silentFetch(baseUrl, 10000);
+    if (homeHtml) {
+      const hrefMatches = homeHtml.match(/href="([^"#?]+)"/g) || [];
+      for (const m of hrefMatches) {
+        const href = m.replace(/href="|"/g, "").trim();
+        let fullUrl = href;
+        if (href.startsWith("/")) fullUrl = baseUrl + href;
+        if (!fullUrl.startsWith("http")) continue;
+        if (isArticleUrl(fullUrl)) sitemapUrls.push(fullUrl);
+      }
+    }
+  }
+
+  if (sitemapUrls.length === 0) {
+    return res.status(404).json({ error: "Could not find any articles on this website. Make sure the URL is correct and the site has a sitemap or RSS feed." });
+  }
+
+  // Deduplicate and limit
+  const uniqueUrls = [...new Set(sitemapUrls)].slice(0, 120);
+  console.log(`[FIND-ANCHOR] Checking ${uniqueUrls.length} URLs for anchor: "${anchorText}"`);
+
+  // Step 3: Check each article for anchor text (parallel, batched)
+  const BATCH_SIZE = 8;
+  for (let i = 0; i < uniqueUrls.length; i += BATCH_SIZE) {
+    const batch = uniqueUrls.slice(i, i + BATCH_SIZE);
+    await Promise.allSettled(batch.map(async (url) => {
+      if (checkedUrls.has(url)) return;
+      checkedUrls.add(url);
+      const { html, ok } = await silentFetch(url, 10000);
+      if (!ok || !html) return;
+      // Use Readability for clean text
+      try {
+        const dom = new JSDOM(html, { url });
+        const reader = new Readability(dom.window.document);
+        const article = reader.parse();
+        if (!article || !article.textContent) return;
+        const textLower = article.textContent.toLowerCase();
+        if (textLower.includes(anchorLower)) {
+          // Find surrounding context (50 chars before and after)
+          const idx = textLower.indexOf(anchorLower);
+          const start = Math.max(0, idx - 80);
+          const end = Math.min(article.textContent.length, idx + anchorLower.length + 80);
+          const context = "..." + article.textContent.slice(start, end).replace(/\s+/g, " ").trim() + "...";
+          foundArticles.push({
+            url,
+            title: article.title || url,
+            context,
+          });
+        }
+      } catch { /* skip */ }
+    }));
+  }
+
+  console.log(`[FIND-ANCHOR] Found ${foundArticles.length} articles with anchor "${anchorText}" out of ${checkedUrls.size} checked`);
+
+  return res.status(200).json({
+    anchorText,
+    websiteUrl: baseUrl,
+    totalChecked: checkedUrls.size,
+    totalFound: foundArticles.length,
+    articles: foundArticles,
+  });
+});
+
 app.post("/api/analyze", async (req, res) => {
   const rawDomain = req.body.domain || "";
   const domain = rawDomain.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];

@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LinkPlace — Find Anchor</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      width: 380px;
+      min-height: 200px;
+      background: #0d0d0f;
+      color: #e4e4e7;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+    }
+
+    .header {
+      padding: 16px 18px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+
+    .header h1 {
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.3px;
+    }
+
+    .header p {
+      font-size: 10px;
+      color: #52525b;
+      margin-top: 1px;
+    }
+
+    .free-badge {
+      margin-left: auto;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 3px 7px;
+      border-radius: 20px;
+      border: 1px solid rgba(16,185,129,0.3);
+      background: rgba(16,185,129,0.08);
+      color: #10b981;
+      text-transform: uppercase;
+    }
+
+    .body { padding: 16px 18px; }
+
+    .field { margin-bottom: 14px; }
+
+    label {
+      display: block;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #71717a;
+      margin-bottom: 6px;
+    }
+
+    .input-wrap {
+      position: relative;
+    }
+
+    .input-wrap svg {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 14px;
+      height: 14px;
+      color: #52525b;
+    }
+
+    input[type=text] {
+      width: 100%;
+      background: #121212;
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 8px;
+      padding: 9px 10px 9px 32px;
+      font-size: 12.5px;
+      color: #d4d4d8;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input[type=text]:focus {
+      border-color: rgba(99,102,241,0.4);
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.08);
+    }
+
+    input[type=text]::placeholder { color: #3f3f46; }
+
+    .auto-fill-btn {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 9px;
+      font-weight: 600;
+      padding: 3px 6px;
+      border-radius: 5px;
+      border: 1px solid rgba(99,102,241,0.3);
+      background: rgba(99,102,241,0.1);
+      color: #6366f1;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .auto-fill-btn:hover { background: rgba(99,102,241,0.2); }
+
+    button#searchBtn {
+      width: 100%;
+      padding: 10px;
+      border-radius: 9px;
+      border: none;
+      background: #6366f1;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      margin-top: 4px;
+    }
+
+    button#searchBtn:hover:not(:disabled) { background: #5254cc; }
+    button#searchBtn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #statusText {
+      text-align: center;
+      font-size: 11px;
+      color: #52525b;
+      margin-top: 10px;
+      min-height: 16px;
+    }
+
+    #results { margin-top: 14px; }
+
+    .results-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .results-header .count {
+      font-size: 12px;
+      font-weight: 600;
+      color: #10b981;
+    }
+
+    .results-header .scanned {
+      font-size: 10px;
+      color: #3f3f46;
+    }
+
+    .article-card {
+      background: #121212;
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      transition: border-color 0.15s;
+    }
+
+    .article-card:hover { border-color: rgba(255,255,255,0.1); }
+
+    .article-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: #fff;
+      margin-bottom: 3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .article-url {
+      font-size: 10px;
+      font-family: monospace;
+      color: #6366f1;
+      margin-bottom: 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+      text-decoration: none;
+      display: block;
+    }
+
+    .article-url:hover { text-decoration: underline; }
+
+    .context-snippet {
+      background: #0a0a0a;
+      border: 1px solid rgba(255,255,255,0.04);
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 10.5px;
+      font-family: monospace;
+      color: #71717a;
+      line-height: 1.5;
+    }
+
+    .context-snippet mark {
+      background: rgba(99,102,241,0.25);
+      color: #a5b4fc;
+      border-radius: 2px;
+      padding: 0 2px;
+    }
+
+    .actions-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 7px;
+    }
+
+    .btn-small {
+      flex: 1;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 5px 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+      color: #a1a1aa;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+
+    .btn-small:hover { background: rgba(255,255,255,0.08); color: #fff; }
+
+    .error-box {
+      background: rgba(239,68,68,0.08);
+      border: 1px solid rgba(239,68,68,0.2);
+      border-radius: 9px;
+      padding: 10px 12px;
+      color: #f87171;
+      font-size: 12px;
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+
+    .no-results {
+      text-align: center;
+      padding: 20px 10px;
+      color: #3f3f46;
+      font-size: 12px;
+    }
+
+    .no-results p { margin-top: 6px; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo">🔗</div>
+    <div>
+      <h1>LinkPlace</h1>
+      <p>Find Anchor Tool</p>
+    </div>
+    <span class="free-badge">Free</span>
+  </div>
+
+  <div class="body">
+    <div class="field">
+      <label>Website URL</label>
+      <div class="input-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <input type="text" id="websiteUrl" placeholder="e.g. buildd.co" />
+        <button class="auto-fill-btn" id="autoFillBtn">Auto-fill</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Anchor Text to Find</label>
+      <div class="input-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" id="anchorText" placeholder="e.g. ai engineering course" />
+      </div>
+    </div>
+
+    <button id="searchBtn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      Find All Mentions
+    </button>
+
+    <div id="statusText"></div>
+    <div id="error" style="display:none"></div>
+    <div id="results" style="display:none"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
