@@ -11,7 +11,8 @@ const errorDiv = document.getElementById("error");
 const resultsDiv = document.getElementById("results");
 const autoFillBtn = document.getElementById("autoFillBtn");
 
-// Auto-fill current tab domain
+let currentData = null;
+let isSearching = false;
 autoFillBtn.addEventListener("click", () => {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     if (tabs[0]?.url) {
@@ -39,7 +40,9 @@ websiteUrlInput.addEventListener("keydown", (e) => {
 
 searchBtn.addEventListener("click", doSearch);
 
-async function doSearch() {
+async function doSearch(isLoadMore = false) {
+  if (isSearching) return;
+  
   const websiteUrl = websiteUrlInput.value.trim();
   const anchorText = anchorTextInput.value.trim();
 
@@ -53,13 +56,17 @@ async function doSearch() {
 
   // Reset UI
   errorDiv.style.display = "none";
-  resultsDiv.style.display = "none";
+  if (!isLoadMore) {
+    resultsDiv.style.display = "none";
+    currentData = null;
+  }
   errorDiv.innerHTML = "";
 
   // Show loading state
+  isSearching = true;
   searchBtn.disabled = true;
-  searchBtn.innerHTML = `<div class="spinner"></div> Scanning articles...`;
-  statusText.textContent = "Fetching sitemap and checking articles...";
+  searchBtn.innerHTML = `<div class="spinner"></div> ${isLoadMore ? 'Finding more...' : 'Scanning articles...'}`;
+  statusText.textContent = isLoadMore ? "Checking more pages..." : "Fetching sitemap and checking articles...";
 
   // Ticker for status
   const steps = [
@@ -75,10 +82,12 @@ async function doSearch() {
   }, 8000);
 
   try {
+    const offset = (isLoadMore && currentData) ? currentData.nextOffset : 0;
+    
     const res = await fetch(`${BACKEND_URL}/api/find-anchor`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ websiteUrl, anchorText })
+      body: JSON.stringify({ websiteUrl, anchorText, urlOffset: offset, limit: 20 })
     });
 
     clearInterval(ticker);
@@ -89,11 +98,22 @@ async function doSearch() {
       return;
     }
 
-    renderResults(data, anchorText);
+    if (isLoadMore && currentData) {
+      currentData.articles = [...currentData.articles, ...data.articles];
+      currentData.totalFound += data.totalFound;
+      currentData.scannedThisRound = (currentData.scannedThisRound || 0) + data.scannedThisRound;
+      currentData.hasMore = data.hasMore;
+      currentData.nextOffset = data.nextOffset;
+    } else {
+      currentData = data;
+    }
+
+    renderResults(currentData, anchorText);
   } catch (err) {
     clearInterval(ticker);
     showError("Failed to connect to server. Make sure you're online and try again.");
   } finally {
+    isSearching = false;
     searchBtn.disabled = false;
     searchBtn.innerHTML = `
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -110,7 +130,6 @@ function renderResults(data, anchorText) {
     resultsDiv.innerHTML = `
       <div class="results-header">
         <span class="count" style="color:#71717a">No mentions found</span>
-        <span class="scanned">${data.totalChecked} pages scanned</span>
       </div>
       <div class="no-results">
         <div style="font-size:24px;margin-bottom:8px">🔍</div>
@@ -148,12 +167,49 @@ function renderResults(data, anchorText) {
   }).join('');
 
   resultsDiv.innerHTML = `
-    <div class="results-header">
+    <div class="results-header" style="justify-content: space-between;">
       <span class="count">✓ ${data.totalFound} article${data.totalFound > 1 ? 's' : ''} found</span>
-      <span class="scanned">${data.totalChecked} pages scanned</span>
+      <button id="exportCsvBtn" class="btn-small" style="flex:0; padding:4px 8px;">Export CSV</button>
     </div>
     <div id="articleList">${articleCards}</div>
+    ${data.hasMore ? `<button id="loadMoreBtn" style="margin-top: 10px; background: rgba(255,255,255,0.05); color: #fff; border: 1px solid rgba(255,255,255,0.1);">Find 20 More</button>` : ''}
   `;
+
+  const exportCsvBtn = document.getElementById("exportCsvBtn");
+  if (exportCsvBtn) {
+    exportCsvBtn.addEventListener("click", () => handleExportCSV(data));
+  }
+  
+  const loadMoreBtn = document.getElementById("loadMoreBtn");
+  if (loadMoreBtn) {
+    loadMoreBtn.addEventListener("click", () => doSearch(true));
+  }
+}
+
+function handleExportCSV(data) {
+  if (!data || !data.articles || data.articles.length === 0) return;
+  
+  const headers = ['Domain', 'Article URL', 'Anchor Text', 'Context'];
+  const rows = data.articles.map(res => [
+    data.websiteUrl,
+    res.url,
+    data.anchorText,
+    `"${res.context.replace(/"/g, '""')}"`
+  ]);
+  
+  const csvContent = [
+    headers.join(','),
+    ...rows.map(row => row.join(','))
+  ].join('\n');
+  
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', `find_anchor_${data.websiteUrl}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 function showError(msg) {

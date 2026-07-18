@@ -733,7 +733,7 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
 // ─── /api/find-anchor — Zero-cost anchor finder (no external APIs) ──────────
 // Crawls a website's sitemap/RSS to find all articles mentioning an anchor text
 app.post("/api/find-anchor", async (req, res) => {
-  const { websiteUrl, anchorText } = req.body;
+  const { websiteUrl, anchorText, urlOffset = 0, limit = 20 } = req.body;
 
   if (!websiteUrl || !anchorText) {
     return res.status(400).json({ error: "websiteUrl and anchorText are required" });
@@ -750,7 +750,6 @@ app.post("/api/find-anchor", async (req, res) => {
 
   const anchorLower = anchorText.toLowerCase().trim();
   const foundArticles = [];
-  const checkedUrls = new Set();
 
   // Helper: fetch a URL silently
   async function silentFetch(url, timeoutMs = 12000) {
@@ -777,7 +776,7 @@ app.post("/api/find-anchor", async (req, res) => {
   ];
 
   for (const sitemapUrl of sitemapCandidates) {
-    if (sitemapUrls.length >= 100) break;
+    if (sitemapUrls.length >= 200) break;
     const { html, ok } = await silentFetch(sitemapUrl, 10000);
     if (!ok || !html) continue;
 
@@ -790,7 +789,7 @@ app.post("/api/find-anchor", async (req, res) => {
           sitemapUrls.push(url);
         }
         // Nested sitemap index
-        if (url && url.includes("sitemap") && url.endsWith(".xml") && sitemapUrls.length < 50) {
+        if (url && url.includes("sitemap") && url.endsWith(".xml") && sitemapUrls.length < 200) {
           const nested = await silentFetch(url, 8000);
           if (nested.ok) {
             const nestedLocs = nested.html.match(/<loc>(.*?)<\/loc>/g) || [];
@@ -836,49 +835,62 @@ app.post("/api/find-anchor", async (req, res) => {
     return res.status(404).json({ error: "Could not find any articles on this website. Make sure the URL is correct and the site has a sitemap or RSS feed." });
   }
 
-  // Deduplicate and limit
-  const uniqueUrls = [...new Set(sitemapUrls)].slice(0, 120);
-  console.log(`[FIND-ANCHOR] Checking ${uniqueUrls.length} URLs for anchor: "${anchorText}"`);
-
-  // Step 3: Check each article for anchor text (parallel, batched)
+  // Deduplicate
+  const uniqueUrls = [...new Set(sitemapUrls)];
+  
+  // Step 3: Fast deterministic scanning with pagination
+  let currentIndex = parseInt(urlOffset, 10) || 0;
   const BATCH_SIZE = 8;
-  for (let i = 0; i < uniqueUrls.length; i += BATCH_SIZE) {
-    const batch = uniqueUrls.slice(i, i + BATCH_SIZE);
-    await Promise.allSettled(batch.map(async (url) => {
-      if (checkedUrls.has(url)) return;
-      checkedUrls.add(url);
+  let scannedThisRound = 0;
+
+  console.log(`[FIND-ANCHOR] Checking URLs starting at ${currentIndex} (Total: ${uniqueUrls.length}) for anchor: "${anchorText}"`);
+
+  while (currentIndex < uniqueUrls.length && foundArticles.length < limit) {
+    const batch = uniqueUrls.slice(currentIndex, currentIndex + BATCH_SIZE);
+    scannedThisRound += batch.length;
+    
+    const results = await Promise.allSettled(batch.map(async (url) => {
       const { html, ok } = await silentFetch(url, 10000);
-      if (!ok || !html) return;
-      // Use Readability for clean text
+      if (!ok || !html) return null;
       try {
         const dom = new JSDOM(html, { url });
         const reader = new Readability(dom.window.document);
         const article = reader.parse();
-        if (!article || !article.textContent) return;
+        if (!article || !article.textContent) return null;
         const textLower = article.textContent.toLowerCase();
         if (textLower.includes(anchorLower)) {
-          // Find surrounding context (50 chars before and after)
           const idx = textLower.indexOf(anchorLower);
           const start = Math.max(0, idx - 80);
           const end = Math.min(article.textContent.length, idx + anchorLower.length + 80);
           const context = "..." + article.textContent.slice(start, end).replace(/\s+/g, " ").trim() + "...";
-          foundArticles.push({
-            url,
-            title: article.title || url,
-            context,
-          });
+          return { url, title: article.title || url, context };
         }
-      } catch { /* skip */ }
+      } catch { return null; }
+      return null;
     }));
+
+    for (let i = 0; i < results.length; i++) {
+      if (results[i].status === "fulfilled" && results[i].value) {
+        if (foundArticles.length < limit) {
+          foundArticles.push(results[i].value);
+        }
+      }
+    }
+    
+    currentIndex += BATCH_SIZE;
   }
 
-  console.log(`[FIND-ANCHOR] Found ${foundArticles.length} articles with anchor "${anchorText}" out of ${checkedUrls.size} checked`);
+  const hasMore = currentIndex < uniqueUrls.length;
+
+  console.log(`[FIND-ANCHOR] Found ${foundArticles.length} matches. Next offset: ${currentIndex}`);
 
   return res.status(200).json({
     anchorText,
     websiteUrl: baseUrl,
-    totalChecked: checkedUrls.size,
     totalFound: foundArticles.length,
+    scannedThisRound,
+    hasMore,
+    nextOffset: currentIndex,
     articles: foundArticles,
   });
 });

@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Globe, Link as LinkIcon, Search, CheckCircle2, AlertCircle, ExternalLink, Copy, ChevronRight, Loader2 } from 'lucide-react';
+import { Globe, Link as LinkIcon, Search, CheckCircle2, AlertCircle, ExternalLink, Copy, ChevronRight, Loader2, Download } from 'lucide-react';
 
 export default function FindAnchorPage() {
   const [websiteUrl, setWebsiteUrl] = useState('');
@@ -26,7 +26,7 @@ export default function FindAnchorPage() {
       const res = await fetch(`${backendUrl}/api/find-anchor`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ websiteUrl: websiteUrl.trim(), anchorText: anchorText.trim() })
+        body: JSON.stringify({ websiteUrl: websiteUrl.trim(), anchorText: anchorText.trim(), urlOffset: 0, limit: 20 })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to search. Please try again.");
@@ -36,6 +36,59 @@ export default function FindAnchorPage() {
     } finally {
       setIsSearching(false);
     }
+  };
+
+  const handleLoadMore = async () => {
+    if (!results || !results.hasMore) return;
+    setIsSearching(true);
+    setError(null);
+
+    try {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://link-place-latest.onrender.com";
+      const res = await fetch(`${backendUrl}/api/find-anchor`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ websiteUrl: websiteUrl.trim(), anchorText: anchorText.trim(), urlOffset: results.nextOffset, limit: 20 })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load more. Please try again.");
+      
+      setResults({
+        ...data,
+        totalFound: results.totalFound + data.totalFound,
+        articles: [...results.articles, ...data.articles]
+      });
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleExportCSV = () => {
+    if (!results || !results.articles || results.articles.length === 0) return;
+    
+    const headers = ['Domain', 'Article URL', 'Anchor Text', 'Context'];
+    const rows = results.articles.map((res: any) => [
+      results.websiteUrl,
+      res.url,
+      results.anchorText,
+      `"${res.context.replace(/"/g, '""')}"`
+    ]);
+    
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `find_anchor_${results.websiteUrl}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleCopy = (url: string, idx: number) => {
@@ -146,7 +199,15 @@ export default function FindAnchorPage() {
                       : `Found ${results.totalFound} article${results.totalFound > 1 ? 's' : ''} mentioning "${results.anchorText}"`}
                   </span>
                 </div>
-                <span className="text-[11px] text-zinc-600">{results.totalChecked} pages scanned</span>
+                {results.totalFound > 0 && (
+                  <button
+                    onClick={handleExportCSV}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white text-xs font-medium transition-all"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Export CSV
+                  </button>
+                )}
               </div>
 
               {results.totalFound === 0 && (
@@ -205,6 +266,20 @@ export default function FindAnchorPage() {
                       )}
                     </motion.div>
                   ))}
+                </div>
+              )}
+
+              {/* Load More Button */}
+              {results.hasMore && (
+                <div className="pt-4 flex justify-center">
+                  <button
+                    onClick={handleLoadMore}
+                    disabled={isSearching}
+                    className="px-6 py-2.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white text-sm font-medium transition-all flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                    Find 20 More
+                  </button>
                 </div>
               )}
             </motion.div>
