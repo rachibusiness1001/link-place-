@@ -305,46 +305,164 @@ export default function ToolPage() {
               )}
 
               {results && results.length > 0 && (
-                <div className="space-y-4 pt-4 border-t border-white/10">
-                  <h3 className="text-white font-medium mb-4 flex items-center gap-2">
+                <div className="space-y-6 pt-4 border-t border-white/10">
+                  <h3 className="text-white font-medium flex items-center gap-2">
                     <CheckCircle2 className="w-5 h-5 text-[#00df81]" />
-                    Found {results.length} Placements
+                    Found {results.length} Placement{results.length > 1 ? 's' : ''}
                   </h3>
-                  {results.map((res: any, idx: number) => (
-                    <div key={idx} className="bg-[#0a0a0a] border border-white/5 rounded-lg p-5">
-                      <div className="flex items-center gap-2 text-xs text-[#00df81] mb-2 font-mono">
-                        <Globe className="w-3 h-3" />
-                        {new URL(res.article_url).hostname.replace('www.', '')}
-                        <span className="text-zinc-600 ml-2">Score: {res.relevance_score}</span>
+                  {results.map((res: any, idx: number) => {
+                    // Highlight the suggested_sentence inside the paragraph
+                    let paragraphDisplay: React.ReactNode = res.paragraph;
+                    if (res.paragraph && res.suggested_sentence) {
+                      const parts = res.paragraph.split(res.suggested_sentence);
+                      if (parts.length >= 2) {
+                        paragraphDisplay = (
+                          <>
+                            {parts[0]}
+                            <span className="underline decoration-[#6366f1] decoration-2 font-semibold text-white">{res.suggested_sentence}</span>
+                            {parts.slice(1).join(res.suggested_sentence)}
+                          </>
+                        );
+                      }
+                    }
+
+                    const naturalFitColor =
+                      res.natural_fit === 'high' ? 'text-[#00df81] border-[#00df81]/30 bg-[#00df81]/10' :
+                      res.natural_fit === 'medium' ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10' :
+                      'text-red-400 border-red-400/30 bg-red-400/10';
+
+                    return (
+                      <div key={idx} className="bg-[#0a0a0a] border border-white/5 rounded-xl overflow-hidden">
+                        {/* Header: Suggestion # */}
+                        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-white/5">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded border border-[#6366f1]/40 bg-[#6366f1]/10 text-[#6366f1] uppercase tracking-widest">
+                            Suggestion {idx + 1}
+                          </span>
+                          <span className="text-xs text-zinc-500 font-medium">{idx === 0 ? 'Best Match' : `Match ${idx + 1}`}</span>
+                        </div>
+
+                        <div className="p-5 space-y-5">
+                          {/* Article Found */}
+                          <div>
+                            <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">Article Found</div>
+                            <div className="bg-[#121212] border border-white/5 rounded-lg px-4 py-2.5">
+                              <a
+                                href={res.article_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[#6366f1] text-sm font-mono hover:underline break-all"
+                              >
+                                {res.article_url}
+                              </a>
+                            </div>
+                          </div>
+
+                          {/* Best Placement Paragraph */}
+                          {res.paragraph && (
+                            <div>
+                              <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">Best Placement Paragraph</div>
+                              <div className="bg-[#121212] border border-white/5 rounded-lg p-4">
+                                <p className="text-zinc-300 text-sm leading-relaxed font-serif">
+                                  {paragraphDisplay}
+                                </p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Scores */}
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs font-bold px-3 py-1 rounded-full border border-[#00df81]/30 bg-[#00df81]/10 text-[#00df81]">
+                              Relevance: {res.relevance_score}/100
+                            </span>
+                            {res.natural_fit && (
+                              <span className={`text-xs font-bold px-3 py-1 rounded-full border ${naturalFitColor}`}>
+                                Natural fit: {res.natural_fit}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Suggested Edit Side by Side */}
+                          <div>
+                            <div className="flex items-center gap-2 mb-3">
+                              <span className="text-sm">✏️</span>
+                              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Suggested Edit</span>
+                            </div>
+                            {res.suggested_sentence && (
+                              <p className="text-zinc-600 text-xs mb-3">Keep the rest of the paragraph as-is — only replace this one sentence.</p>
+                            )}
+                            <div className="grid grid-cols-2 gap-3">
+                              {/* Original */}
+                              <div>
+                                <div className="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-2 flex items-center gap-1">
+                                  <span>✗</span> Original Sentence
+                                </div>
+                                <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-3 min-h-[80px]">
+                                  <p className="text-zinc-500 text-sm leading-relaxed line-through">
+                                    {res.suggested_sentence || '(full paragraph replacement)'}
+                                  </p>
+                                </div>
+                              </div>
+                              {/* Suggested */}
+                              <div>
+                                <div className="text-[10px] font-bold text-[#00df81] uppercase tracking-widest mb-2 flex items-center gap-1">
+                                  <span>✓</span> Suggested Edit
+                                </div>
+                                <div className="bg-[#00df81]/5 border border-[#00df81]/20 rounded-lg p-3 min-h-[80px]">
+                                  <p className="text-zinc-200 text-sm leading-relaxed">
+                                    {res.suggested_edit.replace('[[ANCHOR]]', anchor)}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Copy edited text button */}
+                            <button
+                              onClick={() => {
+                                const finalText = res.suggested_edit.replace('[[ANCHOR]]', anchor);
+                                navigator.clipboard.writeText(finalText);
+                              }}
+                              className="mt-3 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white text-xs font-medium transition-all"
+                            >
+                              📋 Copy edited text
+                            </button>
+                          </div>
+
+                          {/* Why This Spot */}
+                          {res.reason && (
+                            <div>
+                              <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">Why This Spot</div>
+                              <p className="text-zinc-400 text-sm leading-relaxed">{res.reason}</p>
+                            </div>
+                          )}
+
+                          {/* Save to Project */}
+                          <div className="flex items-center justify-between pt-2 border-t border-white/5">
+                            <a href={res.article_url} target="_blank" rel="noopener noreferrer" className="text-zinc-500 text-xs hover:text-white transition-colors">
+                              View Article →
+                            </a>
+                            <button
+                              onClick={() => handleSavePlacement(res, idx)}
+                              disabled={savedIds.has(idx) || !selectedProjectId}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                                savedIds.has(idx)
+                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 cursor-default'
+                                  : selectedProjectId
+                                  ? 'bg-violet-600/20 hover:bg-violet-600/30 text-violet-400 border border-violet-500/20'
+                                  : 'bg-white/5 text-zinc-600 border border-white/5 cursor-not-allowed'
+                              }`}
+                              title={!selectedProjectId ? 'Select a project first' : ''}
+                            >
+                              <BookMarked className="w-3.5 h-3.5" />
+                              {savedIds.has(idx) ? 'Saved!' : 'Save to Project'}
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                      <p className="text-zinc-300 text-sm leading-relaxed font-serif">
-                        {res.suggested_edit}
-                      </p>
-                      <div className="flex items-center justify-between mt-4">
-                        <a href={res.article_url} target="_blank" rel="noopener noreferrer" className="text-zinc-500 text-xs hover:text-white transition-colors">
-                          View Article →
-                        </a>
-                        <button
-                          onClick={() => handleSavePlacement(res, idx)}
-                          disabled={savedIds.has(idx) || !selectedProjectId}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                            savedIds.has(idx)
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 cursor-default'
-                              : selectedProjectId
-                              ? 'bg-violet-600/20 hover:bg-violet-600/30 text-violet-400 border border-violet-500/20'
-                              : 'bg-white/5 text-zinc-600 border border-white/5 cursor-not-allowed'
-                          }`}
-                          title={!selectedProjectId ? 'Select a project first' : ''}
-                        >
-                          <BookMarked className="w-3.5 h-3.5" />
-                          {savedIds.has(idx) ? 'Saved!' : 'Save to Project'}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  
+                    );
+                  })}
+
                   <div className="pt-2">
-                    <button 
+                    <button
                       onClick={handleExportCSV}
                       className="w-full py-2.5 rounded-lg bg-[#0a0a0a] border border-white/10 hover:border-white/20 hover:bg-white/5 text-zinc-300 font-medium text-sm flex items-center justify-center gap-2 transition-all"
                     >
