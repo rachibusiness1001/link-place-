@@ -38,6 +38,10 @@ const inFlight = new Map();
 const DOMAIN_RE = /^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/;
 const URL_RE = /^https?:\/\/.+/;
 
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function validateInputs(domain, anchor, linkto) {
   if (!domain || !anchor || !linkto) return "domain, anchor, and linkto are required";
   if (domain.length > 120) return "domain too long (max 120 chars)";
@@ -854,18 +858,20 @@ app.post("/api/find-anchor", async (req, res) => {
       if (!ok || !html) return null;
       
       // HUGE SPEEDUP: Skip JSDOM parsing completely if the word isn't even in the raw HTML
-      if (!html.toLowerCase().includes(anchorLower)) return null;
+      const fastRegex = new RegExp(`\\b${escapeRegExp(anchorText)}\\b`, "i");
+      if (!fastRegex.test(html)) return null;
 
       try {
         const dom = new JSDOM(html, { url });
         const reader = new Readability(dom.window.document);
         const article = reader.parse();
         if (!article || !article.textContent) return null;
-        const textLower = article.textContent.toLowerCase();
-        if (textLower.includes(anchorLower)) {
-          const idx = textLower.indexOf(anchorLower);
+        
+        const match = article.textContent.match(fastRegex);
+        if (match) {
+          const idx = match.index;
           const start = Math.max(0, idx - 80);
-          const end = Math.min(article.textContent.length, idx + anchorLower.length + 80);
+          const end = Math.min(article.textContent.length, idx + anchorText.length + 80);
           const context = "..." + article.textContent.slice(start, end).replace(/\s+/g, " ").trim() + "...";
           return { url, title: article.title || url, context };
         }
