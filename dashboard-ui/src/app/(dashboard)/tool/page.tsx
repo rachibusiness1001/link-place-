@@ -408,9 +408,15 @@ export default function ToolPage() {
                                   <span>✓</span> Suggested Edit
                                 </div>
                                 <div className="bg-[#00df81]/5 border border-[#00df81]/20 rounded-lg p-3 min-h-[80px]">
-                                  <p className="text-zinc-200 text-sm leading-relaxed">
-                                    {res.suggested_edit.replace('[[ANCHOR]]', anchor)}
-                                  </p>
+                                  <p
+                                    className="text-zinc-200 text-sm leading-relaxed [&_a]:text-[#6366f1] [&_a]:underline [&_a]:font-semibold [&_a]:cursor-pointer"
+                                    dangerouslySetInnerHTML={{
+                                      __html: res.suggested_edit.replace(
+                                        '[[ANCHOR]]',
+                                        `<a href="${linkto}" target="_blank" rel="noopener noreferrer">${anchor}</a>`
+                                      )
+                                    }}
+                                  />
                                 </div>
                               </div>
                             </div>
@@ -418,6 +424,7 @@ export default function ToolPage() {
                             {/* Copy edited text button */}
                             <button
                               onClick={() => {
+                                // Copy plain text (no HTML tags)
                                 const finalText = res.suggested_edit.replace('[[ANCHOR]]', anchor);
                                 navigator.clipboard.writeText(finalText);
                               }}
