@@ -69,6 +69,28 @@ const BLOG_PATH_INDICATORS = [
   "/tips/", "/advice/", "/howto/", "/how-to/", "/tutorial/", "/tutorials/",
 ];
 
+function isContentUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const urlPath = parsed.pathname.replace(/\/$/, "");
+    if (!urlPath || urlPath === "/") return false;
+    
+    const skipPrefixes = ["/tag/", "/category/", "/author/", "/search/", "/page/", "/topics/"];
+    if (skipPrefixes.some(p => urlPath.toLowerCase().startsWith(p))) return false;
+    
+    const rejectWords = ["about", "contact", "login", "register", "signup", "signin", "privacy", "terms", "policy", "cart", "checkout", "pricing"];
+    const segments = urlPath.split("/").filter(Boolean);
+    if (segments.length === 0) return false;
+    
+    if (segments.length === 1 && rejectWords.includes(segments[0].toLowerCase())) return false;
+    if (urlPath.match(/\.(jpg|png|gif|svg|pdf|css|js|xml)$/i)) return false;
+    
+    return true;
+  } catch(e) {
+    return false;
+  }
+}
+
 function isArticleUrl(url) {
   try {
     const parsed = new URL(url);
@@ -764,7 +786,7 @@ app.post("/api/find-anchor", async (req, res) => {
       const locMatches = html.match(/<loc>(.*?)<\/loc>/g) || [];
       for (const m of locMatches) {
         const url = m.replace(/<\/?loc>/g, "").trim();
-        if (url && url.startsWith("http") && isArticleUrl(url)) {
+        if (url && url.startsWith("http") && isContentUrl(url)) {
           sitemapUrls.push(url);
         }
         // Nested sitemap index
@@ -774,7 +796,7 @@ app.post("/api/find-anchor", async (req, res) => {
             const nestedLocs = nested.html.match(/<loc>(.*?)<\/loc>/g) || [];
             for (const nl of nestedLocs) {
               const nUrl = nl.replace(/<\/?loc>/g, "").trim();
-              if (nUrl && nUrl.startsWith("http") && isArticleUrl(nUrl)) sitemapUrls.push(nUrl);
+              if (nUrl && nUrl.startsWith("http") && isContentUrl(nUrl)) sitemapUrls.push(nUrl);
             }
           }
         }
@@ -789,7 +811,7 @@ app.post("/api/find-anchor", async (req, res) => {
       const atomLinks = html.match(/href="([^"]+)"/g) || [];
       for (const m of [...linkMatches, ...guidMatches]) {
         const url = m.replace(/<[^>]+>/g, "").trim();
-        if (url && url.startsWith("http") && isArticleUrl(url)) sitemapUrls.push(url);
+        if (url && url.startsWith("http") && isContentUrl(url)) sitemapUrls.push(url);
       }
       if (sitemapUrls.length > 0) break;
     }
@@ -805,7 +827,7 @@ app.post("/api/find-anchor", async (req, res) => {
         let fullUrl = href;
         if (href.startsWith("/")) fullUrl = baseUrl + href;
         if (!fullUrl.startsWith("http")) continue;
-        if (isArticleUrl(fullUrl)) sitemapUrls.push(fullUrl);
+        if (isContentUrl(fullUrl)) sitemapUrls.push(fullUrl);
       }
     }
   }
