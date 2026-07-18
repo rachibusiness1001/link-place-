@@ -39,14 +39,11 @@ export default function Sidebar() {
     { name: 'Dashboard', href: '/dashboard', icon: Home },
     { name: 'Find Placement', href: '/tool', icon: Search },
     { name: 'Branded Anchor', href: '/branded-anchor', icon: Anchor },
-    { name: 'Manage Placements', href: '/manage-placements', icon: BookMarked },
+    { name: 'All Projects', href: '/manage-placements', icon: BookMarked },
     { name: 'Bulk Placements', href: '#', icon: FileText, comingSoon: true },
   ];
 
-  const projectsMenu = [
-    { name: 'SaaS Backlinks', href: '#', icon: LinkIcon, comingSoon: true },
-    { name: 'GP SaaS Sites', href: '#', icon: Globe, comingSoon: true },
-  ];
+  const { projects } = useAppStore();
 
   return (
     <aside className="w-64 h-screen fixed left-0 top-0 bg-[#0d0d0f] border-r border-white/5 flex flex-col z-50 text-zinc-400">
@@ -114,20 +111,33 @@ export default function Sidebar() {
         {/* Projects Menu */}
         <div className="mb-6">
           <div className="text-[10px] font-bold text-zinc-500/80 uppercase tracking-[0.15em] mb-2 px-6 flex items-center justify-between">
-            Projects <ChevronRight className="w-3 h-3" />
+            Your Projects <ChevronRight className="w-3 h-3" />
           </div>
           <nav className="space-y-0.5 px-3">
-            {projectsMenu.map((item) => {
-              const Icon = item.icon;
-              return (
-                <button key={item.name} onClick={handleSoonClick} className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm hover:bg-white/5 transition-colors group">
-                  <div className="flex items-center gap-3">
-                    <Icon className="w-4 h-4 opacity-70 group-hover:opacity-100 transition-opacity" />
-                    <span>{item.name}</span>
-                  </div>
-                </button>
-              );
-            })}
+            {projects.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-zinc-600 italic">No projects yet</div>
+            ) : (
+              projects.map((project) => {
+                const isActive = pathname === `/project/${project.id}`;
+                return (
+                  <Link key={project.id} href={`/project/${project.id}`} className="block relative">
+                    {isActive && (
+                      <motion.div
+                        layoutId="sidebar-project-active"
+                        className="absolute inset-0 bg-[#1e1b38] rounded-lg border border-[#3b327b]"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ type: "spring", stiffness: 400, damping: 35 }}
+                      />
+                    )}
+                    <div className={`relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm ${isActive ? 'text-white' : 'hover:bg-white/5 hover:text-white'}`}>
+                      <LinkIcon className={`w-4 h-4 ${isActive ? 'text-violet-400' : 'opacity-70 text-violet-400/50'}`} />
+                      <span className="font-medium truncate">{project.name}</span>
+                    </div>
+                  </Link>
+                );
+              })
+            )}
           </nav>
         </div>
 
