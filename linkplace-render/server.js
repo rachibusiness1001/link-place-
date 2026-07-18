@@ -840,7 +840,7 @@ app.post("/api/find-anchor", async (req, res) => {
   
   // Step 3: Fast deterministic scanning with pagination
   let currentIndex = parseInt(urlOffset, 10) || 0;
-  const BATCH_SIZE = 8;
+  const BATCH_SIZE = 25; // Increased for speed
   let scannedThisRound = 0;
 
   console.log(`[FIND-ANCHOR] Checking URLs starting at ${currentIndex} (Total: ${uniqueUrls.length}) for anchor: "${anchorText}"`);
@@ -852,6 +852,10 @@ app.post("/api/find-anchor", async (req, res) => {
     const results = await Promise.allSettled(batch.map(async (url) => {
       const { html, ok } = await silentFetch(url, 10000);
       if (!ok || !html) return null;
+      
+      // HUGE SPEEDUP: Skip JSDOM parsing completely if the word isn't even in the raw HTML
+      if (!html.toLowerCase().includes(anchorLower)) return null;
+
       try {
         const dom = new JSDOM(html, { url });
         const reader = new Readability(dom.window.document);
