@@ -1032,3 +1032,5 @@ app.post("/api/analyze", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`LinkPlace v3 running on port ${PORT}`));
+
+module.exports = { app, runAnalysis, searchArticles, scrapeAndScore };
