@@ -537,23 +537,6 @@
         <div class="field-hint">Automatically used if no placement is found for the primary anchor.</div>
       </div>
 
-      <!-- NEW VARIATIONS UI SECTION FOR NORMAL -->
-      <div style="margin-top: 20px; border-top: 1px dashed var(--border); padding-top: 16px;">
-        <button type="button" class="btn-regenerate" style="margin-top: 0; background: rgba(124,109,250,0.1); border-color: var(--accent);" id="gen-var-btn" onclick="generateVariationsUI('')">
-          ✨ Generate 10 AI Anchor Variations (Sequential Fallback)
-        </button>
-        <div id="variations-box" style="display:none; margin-top:16px; padding:16px; background:var(--bg3); border:1px solid var(--border); border-radius:10px; text-align:left;">
-          <div style="font-size:13px; font-weight:600; color:var(--text1); margin-bottom:4px;">Select 3-4 Anchor Variations (Ordered Fallback Sequence):</div>
-          <div style="font-size:12px; color:var(--text2); margin-bottom:12px; line-height:1.4;">If your primary anchor doesn't find a placement, the system will automatically try these next, in the order arranged. Click options below to add or remove them.</div>
-          
-          <div style="font-size:12px; font-weight:600; color:var(--accent); margin-bottom:6px;">Selected Fallback Sequence:</div>
-          <div id="selected-sequence" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; min-height:36px; padding:10px; background:var(--bg2); border-radius:8px; border:1px dashed var(--border);"></div>
-
-          <div style="font-size:12px; font-weight:600; color:var(--text2); margin-bottom:6px;">Available AI Suggestions (Click to select/reorder):</div>
-          <div id="available-chips" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
-        </div>
-      </div>
-
       <button class="btn-primary" id="analyze-btn" onclick="analyze()" style="margin-top: 20px;">
         Find Best Placement ↗
       </button>
@@ -574,20 +557,19 @@
         <div class="field-hint">Domain only — no need for https://</div>
       </div>
 
-      <div class="field-row">
-        <div class="field">
-          <label>Branded Anchor</label>
-          <div class="input-wrap">
-            <span class="input-icon">#</span>
-            <input type="text" id="anchor-branded" placeholder="Zentago" />
-          </div>
+      <div class="field" style="margin-top: 16px;">
+        <label>Brand / Anchor Text</label>
+        <div class="input-wrap">
+          <span class="input-icon">#</span>
+          <input type="text" id="anchor-branded" placeholder="Zentago" />
         </div>
-        <div class="field">
-          <label>Link to (destination URL)</label>
-          <div class="input-wrap">
-            <span class="input-icon">→</span>
-            <input type="text" id="linkto-branded" placeholder="https://zentago.com/invoice-tools" />
-          </div>
+      </div>
+
+      <div class="field" style="margin-top: 16px;">
+        <label>Link to (Destination URL)</label>
+        <div class="input-wrap">
+          <span class="input-icon">🔗</span>
+          <input type="text" id="linkto-branded" placeholder="https://zentago.com/invoicing" autocomplete="off" />
         </div>
       </div>
 
@@ -599,27 +581,47 @@
         </div>
       </div>
 
-      <!-- NEW VARIATIONS UI SECTION FOR BRANDED -->
-      <div style="margin-top: 20px; border-top: 1px dashed var(--border); padding-top: 16px;">
-        <button type="button" class="btn-regenerate" style="margin-top: 0; background: rgba(124,109,250,0.1); border-color: var(--accent);" id="gen-var-btn-branded" onclick="generateVariationsUI('-branded')">
-          ✨ Generate 10 AI Anchor Variations (Sequential Fallback)
-        </button>
-        <div id="variations-box-branded" style="display:none; margin-top:16px; padding:16px; background:var(--bg3); border:1px solid var(--border); border-radius:10px; text-align:left;">
-          <div style="font-size:13px; font-weight:600; color:var(--text1); margin-bottom:4px;">Select 3-4 Anchor Variations (Ordered Fallback Sequence):</div>
-          <div style="font-size:12px; color:var(--text2); margin-bottom:12px; line-height:1.4;">If your primary anchor doesn't find a placement, the system will automatically try these next, in the order arranged. Click options below to add or remove them.</div>
-          
-          <div style="font-size:12px; font-weight:600; color:var(--accent); margin-bottom:6px;">Selected Fallback Sequence:</div>
-          <div id="selected-sequence-branded" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; min-height:36px; padding:10px; background:var(--bg2); border-radius:8px; border:1px dashed var(--border);"></div>
-
-          <div style="font-size:12px; font-weight:600; color:var(--text2); margin-bottom:6px;">Available AI Suggestions (Click to select/reorder):</div>
-          <div id="available-chips-branded" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
-        </div>
-      </div>
-
       <button class="btn-primary" id="analyze-btn-branded" onclick="analyze(true)" style="margin-top: 20px;">
         Find Branded Placement ↗
       </button>
       <div class="error-box" id="error-box-branded"></div>
+    </div>
+  </div>
+
+  <!-- Anchor Selection Modal -->
+  <div id="anchor-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+    <div style="background:var(--bg2); border:1px solid var(--border); border-radius:16px; width:90%; max-width:520px; padding:28px; box-shadow:0 20px 40px rgba(0,0,0,0.5); text-align:left; position:relative;">
+      <h3 style="margin:0 0 8px 0; font-size:18px; color:var(--text1); display:flex; align-items:center; gap:8px;">
+        ✨ Select Fallback Anchor Variations
+      </h3>
+      <p style="font-size:13px; color:var(--text2); margin:0 0 16px 0; line-height:1.5;">
+        We generated 5 closely related anchor variations. Check the ones you want the system to try in order if your primary anchor doesn't find a placement:
+      </p>
+
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px; font-weight:600; color:var(--accent); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">1. Primary Anchor (Pinned & Tried First)</div>
+        <div style="padding:10px 14px; background:rgba(16,185,129,0.12); border:1px solid #10b981; border-radius:8px; color:#10b981; font-weight:600; font-size:14px; display:flex; align-items:center; gap:8px;">
+          <span style="background:#10b981; color:#000; width:20px; height:20px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:12px; font-weight:bold;">1</span>
+          <span id="modal-primary-text"></span>
+        </div>
+      </div>
+
+      <div style="margin-bottom:24px;">
+        <div style="font-size:12px; font-weight:600; color:var(--text2); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">2. Select Fallback Variations (Tried in Order)</div>
+        <div id="modal-variations-loading" style="padding:20px; text-align:center; color:var(--text3); font-size:13px; background:var(--bg3); border-radius:8px; border:1px dashed var(--border);">
+          ⏳ Generating 5 related semantic anchors...
+        </div>
+        <div id="modal-variations-list" style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto;"></div>
+      </div>
+
+      <div style="display:flex; gap:12px; justify-content:flex-end;">
+        <button type="button" style="padding:10px 18px; border-radius:8px; background:transparent; border:1px solid var(--border); color:var(--text2); cursor:pointer; font-size:13px; font-weight:600;" onclick="closeAnchorModal(true)">
+          Skip & Use Primary Only
+        </button>
+        <button type="button" id="modal-done-btn" class="btn-primary" style="margin:0; width:auto; padding:10px 24px; font-size:14px;" onclick="confirmAnchorSelection()">
+          Done ↗
+        </button>
+      </div>
     </div>
   </div>
 
@@ -637,7 +639,6 @@
   <!-- Loading -->
 <div class="loading-card" id="loading-card">
   <ul class="loading-steps">
-    <li id="step-0"><span class="step-dot"></span> Generating semantic keywords...</li>
     <li id="step-1"><span class="step-dot"></span> Searching for the best article on this domain...</li>
     <li id="step-2"><span class="step-dot"></span> Fetching article content...</li>
     <li id="step-3"><span class="step-dot"></span> Scanning paragraphs for relevance...</li>
@@ -884,120 +885,95 @@ async function callAPI(domain, anchor, altAnchor, linkto, excludedParagraphs, is
   return result;
 }
 
-let _selectedVariations = { '': [], '-branded': [] };
-let _allVariations = { '': [], '-branded': [] };
+let _modalIsBranded = false;
 
-async function generateVariationsUI(suffix) {
+async function analyze(brandedFlag = false) {
+  const suffix = brandedFlag ? '-branded' : '';
+  const domain = document.getElementById('domain' + suffix).value.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
   const anchor = document.getElementById('anchor' + suffix).value.trim();
   const linkto = document.getElementById('linkto' + suffix).value.trim();
   const errBox = document.getElementById('error-box' + suffix);
   errBox.classList.remove('show');
-  
-  if (!anchor || !linkto) {
-    errBox.innerHTML = 'Please fill in Anchor text and Link to (destination URL) first to generate variations.';
+
+  if (!domain || !anchor || !linkto) {
+    errBox.textContent = 'Please fill in all three fields — domain, anchor text, and destination URL.';
     errBox.classList.add('show');
     return;
   }
 
-  const btn = document.getElementById('gen-var-btn' + suffix);
-  const oldText = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '⏳ Generating 10 variations...';
+  _modalIsBranded = brandedFlag;
+  document.getElementById('modal-primary-text').textContent = anchor;
+  document.getElementById('modal-variations-loading').style.display = 'block';
+  document.getElementById('modal-variations-list').innerHTML = '';
+  document.getElementById('anchor-modal').style.display = 'flex';
 
   try {
     const res = await fetch('/api/generate-anchor-variations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ anchor, linkto })
+      body: JSON.stringify({ anchor })
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to generate variations');
-    
-    _allVariations[suffix] = data.variations || [];
-    _selectedVariations[suffix] = []; // Start with none selected (user must select explicitly per STEP 2)
-    
-    renderVariationsBox(suffix);
-    document.getElementById('variations-box' + suffix).style.display = 'block';
+    document.getElementById('modal-variations-loading').style.display = 'none';
+
+    const variations = (data.variations || []).filter(v => v.toLowerCase() !== anchor.toLowerCase());
+    let html = '';
+    variations.slice(0, 5).forEach((v) => {
+      html += `<label class="variation-item" style="display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--bg3); border:1px solid var(--border); border-radius:8px; cursor:pointer; font-size:14px; color:var(--text1); transition:all 0.2s;">
+        <input type="checkbox" name="fallback_var_cb" value="${escapeHtml(v)}" checked style="width:16px; height:16px; accent-color:var(--accent); cursor:pointer;">
+        <span>${escapeHtml(v)}</span>
+      </label>`;
+    });
+    if (!html) {
+      html = `<div style="color:var(--text3); font-size:13px; padding:10px;">No additional variations generated.</div>`;
+    }
+    document.getElementById('modal-variations-list').innerHTML = html;
   } catch (err) {
-    errBox.innerHTML = 'Error generating variations: ' + escapeHtml(err.message);
-    errBox.classList.add('show');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = oldText;
+    document.getElementById('modal-variations-loading').style.display = 'none';
+    document.getElementById('modal-variations-list').innerHTML = `<div style="color:var(--red); font-size:13px; padding:10px;">Could not load variations: ${escapeHtml(err.message)}</div>`;
   }
 }
 
-function toggleVariation(val, suffix) {
-  const list = _selectedVariations[suffix];
-  const idx = list.indexOf(val);
-  if (idx >= 0) {
-    list.splice(idx, 1);
-  } else {
-    list.push(val);
-  }
-  renderVariationsBox(suffix);
-}
-
-function reorderVariation(idx, direction, suffix) {
-  const list = _selectedVariations[suffix];
-  if (direction === 'up' && idx > 0) {
-    const temp = list[idx - 1];
-    list[idx - 1] = list[idx];
-    list[idx] = temp;
-  } else if (direction === 'down' && idx < list.length - 1) {
-    const temp = list[idx + 1];
-    list[idx + 1] = list[idx];
-    list[idx] = temp;
-  }
-  renderVariationsBox(suffix);
-}
-
-function renderVariationsBox(suffix) {
+function confirmAnchorSelection() {
+  const suffix = _modalIsBranded ? '-branded' : '';
   const anchor = document.getElementById('anchor' + suffix).value.trim();
-  const selContainer = document.getElementById('selected-sequence' + suffix);
-  const availContainer = document.getElementById('available-chips' + suffix);
-  const list = _selectedVariations[suffix];
-  const all = _allVariations[suffix];
+  const altAnchor = document.getElementById('altAnchor' + suffix).value.trim();
 
-  let selHtml = `<div class="chip pinned" title="Pinned Primary Anchor"><span class="badge">1</span> <span class="txt">${escapeHtml(anchor)}</span> <span style="font-size:10px; opacity:0.8;">(Primary - Pinned)</span></div>`;
-  list.forEach((val, i) => {
-    selHtml += `<div class="chip selected" onclick="toggleVariation('${escapeHtml(val)}', '${suffix}')" title="Click to remove">
-      <span class="badge">${i + 2}</span> 
-      <span class="txt">${escapeHtml(val)}</span>
-      <span style="display:inline-flex; gap:2px; margin-left:4px;" onclick="event.stopPropagation();">
-        ${i > 0 ? `<button type="button" class="reorder-btn" onclick="reorderVariation(${i}, 'up', '${suffix}'); event.stopPropagation();">↑</button>` : ''}
-        ${i < list.length - 1 ? `<button type="button" class="reorder-btn" onclick="reorderVariation(${i}, 'down', '${suffix}'); event.stopPropagation();">↓</button>` : ''}
-      </span>
-      <span style="margin-left:4px; font-weight:bold;">×</span>
-    </div>`;
-  });
-  selContainer.innerHTML = selHtml;
+  const checkedBoxes = document.querySelectorAll('input[name="fallback_var_cb"]:checked');
+  const selectedVars = Array.from(checkedBoxes).map(cb => cb.value);
 
-  let availHtml = '';
-  all.forEach((val) => {
-    if (val.toLowerCase() === anchor.toLowerCase()) return;
-    const isSel = list.includes(val);
-    availHtml += `<div class="chip option ${isSel ? 'selected' : ''}" onclick="toggleVariation('${escapeHtml(val)}', '${suffix}')">
-      <span class="txt">${escapeHtml(val)}</span>
-      ${isSel ? '<span style="margin-left:4px;">✓</span>' : '<span style="margin-left:4px; opacity:0.5;">+</span>'}
-    </div>`;
-  });
-  if (!availHtml) availHtml = `<div style="color:var(--text3); font-size:12px;">No additional variations generated.</div>`;
-  availContainer.innerHTML = availHtml;
-}
+  let anchorsToTry = [anchor];
+  if (selectedVars.length > 0) {
+    anchorsToTry = [anchor, ...selectedVars];
+  } else if (altAnchor) {
+    anchorsToTry = [anchor, altAnchor];
+  }
 
-async function analyze(brandedFlag = false) {
-  // Reset excluded paragraphs and article URLs on fresh analyze
+  document.getElementById('anchor-modal').style.display = 'none';
+
   _excludedParagraphs = [];
   _excludedArticleUrls = [];
-  await runAnalysis(false, brandedFlag);
+  runAnalysis(false, _modalIsBranded, anchorsToTry);
+}
+
+function closeAnchorModal(skipToPrimary = false) {
+  document.getElementById('anchor-modal').style.display = 'none';
+  if (skipToPrimary) {
+    const suffix = _modalIsBranded ? '-branded' : '';
+    const anchor = document.getElementById('anchor' + suffix).value.trim();
+    const altAnchor = document.getElementById('altAnchor' + suffix).value.trim();
+    const anchorsToTry = altAnchor ? [anchor, altAnchor] : [anchor];
+    _excludedParagraphs = [];
+    _excludedArticleUrls = [];
+    runAnalysis(false, _modalIsBranded, anchorsToTry);
+  }
 }
 
 async function regenerate() {
-  await runAnalysis(true, _isBrandedMode);
+  await runAnalysis(true, _isBrandedMode, null);
 }
 
-async function runAnalysis(isRegenerate = false, brandedFlag = false) {
+async function runAnalysis(isRegenerate = false, brandedFlag = false, customAnchors = null) {
   const suffix = brandedFlag ? '-branded' : '';
   const domain = document.getElementById('domain' + suffix).value.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
   const anchor = document.getElementById('anchor' + suffix).value.trim();
@@ -1027,13 +1003,10 @@ async function runAnalysis(isRegenerate = false, brandedFlag = false) {
   startLoading();
 
   try {
-    let anchors = undefined;
-    if (_selectedVariations[suffix] && _selectedVariations[suffix].length > 0) {
-      anchors = [anchor, ..._selectedVariations[suffix]];
-    } else if (altAnchor) {
-      anchors = [anchor, altAnchor];
-    } else {
-      anchors = [anchor];
+    let anchors = customAnchors;
+    if (!anchors) {
+      if (altAnchor) anchors = [anchor, altAnchor];
+      else anchors = [anchor];
     }
     const result = await callAPI(domain, anchor, altAnchor, linkto, _excludedParagraphs, brandedFlag, _excludedArticleUrls, anchors);
     stopLoading();
@@ -1080,7 +1053,7 @@ async function runAnalysis(isRegenerate = false, brandedFlag = false) {
     let errMsg = err.message || 'Something went wrong. Please try again.';
     if (err.suggestion) {
       errMsg += `<br><br><b style="color:var(--text1);">💡 Suggestion:</b> ${escapeHtml(err.suggestion)}`;
-      errMsg += `<br><br><button type="button" class="btn-regenerate" style="margin-top:8px; width:auto; padding:6px 14px;" onclick="generateVariationsUI('${suffix}')">✨ Regenerate AI Variations</button>`;
+      errMsg += `<br><br><button type="button" class="btn-regenerate" style="margin-top:8px; width:auto; padding:6px 14px;" onclick="analyze(${brandedFlag})">✨ Select & Try Other Anchor Variations</button>`;
     }
     if (err.anchors_tried && Array.isArray(err.anchors_tried)) {
       errMsg += `<br><br><b style="color:var(--text2);">Tried Anchors (${err.anchors_tried.length}):</b> <span style="color:var(--text3);">${err.anchors_tried.map(a => `'${escapeHtml(a)}'`).join(', ')}</span>`;

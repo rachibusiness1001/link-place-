@@ -208,8 +208,8 @@ Rules:
 }
 
 // ─── Multi-Anchor Variation Generation ─────────────────────────────────────────
-async function generateAnchorVariations(originalAnchor, targetPageInfo) {
-  console.log(`[VARIATIONS] Generating anchor variations for "${originalAnchor}"`);
+async function generateAnchorVariations(originalAnchor) {
+  console.log(`[VARIATIONS] Generating 5 semantic anchor variations for "${originalAnchor}"`);
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -221,20 +221,16 @@ async function generateAnchorVariations(originalAnchor, targetPageInfo) {
       signal: AbortSignal.timeout(12000),
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 300,
+        max_tokens: 150,
         temperature: 0.3,
-        system: "You are an SEO expert. Return ONLY a JSON array of 10 strings, nothing else. No explanation, no backticks.",
+        system: "You are an SEO expert. Return ONLY a JSON array of exactly 5 strings, nothing else. No explanation, no backticks.",
         messages: [{
           role: "user",
-          content: `Given this anchor text: "${originalAnchor}" and this target page topic summary: "${targetPageInfo?.summary || targetPageInfo?.title || ''}", generate exactly 10 natural alternative anchor phrases that could realistically link to the same destination page.
-    
-    Include a mix of:
-    - Close synonyms of the original anchor (2-3 phrases)
-    - Slightly broader related phrases (3-4 phrases)  
-    - Phrases emphasizing a different angle of the same topic (3-4 phrases)
-    
-    Each phrase must read naturally if inserted into a sentence on a blog. 
-    Return ONLY a valid JSON array of 10 strings, nothing else — no markdown, no explanation.`
+          content: `Given this exact anchor text: "${originalAnchor}", generate exactly 5 close, natural, highly relevant alternative anchor phrases (synonyms, semantic variations, or closely related phrasing) that mean almost the same thing and could be used as anchor text for the exact same topic.
+          
+Do NOT generate keywords about unrelated topics. Every single phrase MUST be a direct semantic variation or close alternative to "${originalAnchor}".
+
+Return ONLY a valid JSON array of exactly 5 strings, nothing else — no markdown, no explanation.`
         }],
       }),
     });
@@ -245,7 +241,7 @@ async function generateAnchorVariations(originalAnchor, targetPageInfo) {
     const arr = JSON.parse(cleanJson);
     if (Array.isArray(arr) && arr.length > 0) {
       console.log(`[VARIATIONS] Generated (${arr.length}): ${arr.slice(0, 5).join(", ")}`);
-      return arr.slice(0, 10).map(s => String(s).trim()).filter(Boolean);
+      return arr.slice(0, 5).map(s => String(s).trim()).filter(Boolean);
     }
   } catch (err) {
     console.log(`[VARIATIONS] Failed: ${err.message}`);
@@ -1044,11 +1040,10 @@ app.post("/api/find-anchor", async (req, res) => {
 });
 
 app.post("/api/variations", async (req, res) => {
-  const { anchor, linkto } = req.body;
-  if (!anchor || !linkto) return res.status(400).json({ error: "Anchor and destination URL required." });
+  const { anchor } = req.body;
+  if (!anchor) return res.status(400).json({ error: "Anchor required." });
   try {
-    const targetPageInfo = await analyzeLinktoPage(linkto);
-    const variations = await generateAnchorVariations(anchor, targetPageInfo);
+    const variations = await generateAnchorVariations(anchor);
     return res.status(200).json({ variations });
   } catch (err) {
     return res.status(500).json({ error: err.message });
@@ -1056,15 +1051,13 @@ app.post("/api/variations", async (req, res) => {
 });
 
 app.post("/api/generate-anchor-variations", async (req, res) => {
-  const { anchor, linkto } = req.body;
-  if (!anchor || !linkto) return res.status(400).json({ error: "Anchor and destination URL required." });
+  const { anchor } = req.body;
+  if (!anchor) return res.status(400).json({ error: "Anchor required." });
   try {
-    const targetPageInfo = await analyzeLinktoPage(linkto);
-    const variations = await generateAnchorVariations(anchor, targetPageInfo);
+    const variations = await generateAnchorVariations(anchor);
     return res.status(200).json({
       original_anchor: anchor,
-      variations: variations.length > 0 ? variations : [anchor],
-      target_summary: targetPageInfo?.summary || ""
+      variations: variations.length > 0 ? variations : [anchor]
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });
