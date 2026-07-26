@@ -293,10 +293,13 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
     `site:${domain} ${keywords[0] || "software"}`,
     `site:${domain} ${keywords[1] || "tool"}`
   ] : [
-    `site:${domain} "${phrase}"`,
-    `site:${domain} ${phrase}`,
-    `site:${domain} ${keywords.slice(0, 2).join(" ")}`,
+    // ✅ FIX: Broad topical keywords FIRST — this finds mid-article discussion paragraphs
+    `site:${domain} ${keywords.slice(0, 3).join(" ")}`,
+    `site:${domain} ${keywords[0] || ""} ${keywords[1] || ""}`,
     `site:${domain} ${keywords[0] || "blog"}`,
+    // ✅ FIX: Exact anchor phrase now LAST — only used as a supplementary source,
+    // not the primary driver (this was causing intro-paragraph bias)
+    `site:${domain} "${phrase}"`,
   ];
 
   const allUrls = new Set();
@@ -317,7 +320,8 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
         if (r.link && r.link.includes(domain) && isArticleUrl(r.link)) allUrls.add(r.link);
       }
       console.log(`[SEARCH] Total valid URLs so far: ${allUrls.size}`);
-      if (allUrls.size >= 4) break;
+      // ✅ FIX: removed the early break at 4 URLs — now all queries get a chance to run
+      // so broader topical queries aren't skipped just because exact-phrase query filled the quota
     } catch (err) {
       console.log(`[SEARCH] Query failed: ${err.message}`);
     }
@@ -352,7 +356,10 @@ function segmentParagraphs(articleHtml) {
     const dom = new JSDOM(articleHtml);
     const doc = dom.window.document;
     const paragraphs = [];
-    doc.querySelectorAll("p, li, blockquote, h2, h3, h4").forEach((el) => {
+    // ✅ FIX: removed "li, h2, h3, h4" — only real prose paragraphs and blockquotes qualify.
+    // Headings have no surrounding discussion, and list items are usually too fragmented
+    // for a natural bridging sentence.
+    doc.querySelectorAll("p, blockquote").forEach((el) => {
       const text = el.textContent.replace(/\s+/g, " ").trim();
       const linkCount = el.querySelectorAll("a").length;
       if (text.length >= 50 && linkCount <= 3) paragraphs.push({ text, linkCount });
@@ -380,7 +387,11 @@ function isQualityParagraph(text, linkCount, isToolTarget = false) {
   for (const pattern of NOISE_PATTERNS) { if (pattern.test(text)) return false; } // STAGE A.4: Not promotional/noise
   const capsRatio = (text.match(/[A-Z]/g) || []).length / text.length;
   if (capsRatio > 0.25) return false; // STAGE A.6: Not all-caps/heading noise
-  if (isToolTarget && mentionstool(text)) return false; // STAGE A.5: Not single-tool deep-dive when target is tool
+  // ✅ FIX: removed the "isToolTarget &&" gate — this rule should apply 
+  // regardless of whether the destination itself is a tool page.
+  // A paragraph that is ENTIRELY about one specific tool's features 
+  // should never host an unrelated anchor link, no matter what the target is.
+  if (mentionstool(text)) return false;
   return true;
 }
 
@@ -492,7 +503,18 @@ async function analyzeWithAI(paragraphs, anchor, linkto, linktoInfo, isBranded =
     return "TIER 3 (LAST RESORT related domain)";
   };
 
-  const paragraphText = finalPool.map((p, i) => `[${i + 1}] (Article: ${p.url}, Score: ${p.score ? p.score.toFixed(1) : 0} — ${getTierLabel(p.score || 0)})\n${p.text.slice(0, 1000)}`).join("\n\n---\n\n");
+  // ✅ FIX: include previous/next paragraph snippets so Haiku understands 
+  // the surrounding narrative flow, not just an isolated paragraph
+  const formatParagraphForAI = (p, idx) => {
+    const prevSnippet = p.prevText ? p.prevText.slice(0, 120) : "(none — start of eligible section)";
+    const nextSnippet = p.nextText ? p.nextText.slice(0, 120) : "(none — end of eligible section)";
+    return `[${idx}] (Article: ${p.url}, Score: ${p.score ? p.score.toFixed(1) : 0} — ${getTierLabel(p.score || 0)})
+Previous context: "...${prevSnippet}"
+PARAGRAPH: ${p.text}
+Next context: "${nextSnippet}..."`;
+  };
+
+  const paragraphText = finalPool.map((p, i) => formatParagraphForAI(p, i + 1)).join("\n\n---\n\n");
 
   const linktoBrief = linktoInfo?.title
     ? `Destination page topic: "${linktoInfo.title.slice(0, 100)}"`
@@ -510,7 +532,7 @@ Respond ONLY with valid JSON. No markdown, no backticks, no explanation outside 
   const userPrompt = `Anchor text to place: "${anchor}"
 ${linktoBrief}
 
-Analyze the paragraphs below. Pick the TWO best paragraphs from different articles where the anchor link can be placed organically.
+Analyze the paragraphs below. Pick the TWO best paragraphs where the anchor link can be placed organically (preferring different articles when possible).
 
 ═══════════════════════════════════════
 STAGE C — TIERED SELECTION LADDER
@@ -531,7 +553,13 @@ STAGE D — PLACEMENT & EDITING RULES
    c) For Tier 2/3, use softer framing language ("for those who want to explore this further," "a related resource," "if you're looking to build this skill") rather than claiming the paragraph was already about the target topic.
 3. ABSOLUTE NON-IRRELEVANCE RULE: Do not place a link where the paragraph's broad subject domain has NO reasonable relation at all to the target URL (e.g., team lunch traditions linking to Python course).
 4. JUSTIFICATION FIELD (always required in "reason"): One sentence explaining the connection — for Tier 1 direct, for Tier 2/3 say honestly "adjacent topic, bridged via [reason]".
-5. CRITICAL: You MUST ALWAYS return exactly 2 suggestions from DIFFERENT articles (different URLs). Do NOT fail or return empty unless literally zero domain-level relation exists across all paragraphs.${brandedRule}
+5. Prefer suggestions from DIFFERENT articles when at least two articles have 
+   genuinely strong (Tier 1 or Tier 2) candidate paragraphs. However, relevance 
+   ALWAYS takes priority over diversity: if only ONE article has a Tier 1/2 
+   quality match and no other article rises above Tier 3, it is completely 
+   Never sacrifice relevance quality just to satisfy article diversity.
+   Only return fewer than 2 suggestions if genuinely nothing across all 
+   paragraphs meets even Tier 3 relevance.${brandedRule}
 
 Paragraphs:
 ${paragraphText}
@@ -589,13 +617,15 @@ Return this exact JSON with two suggestions:
 }
 
 function mentionstool(text) {
-  // Check if paragraph already mentions a competing tool/software
   const toolPatterns = [
     /\b(using|use|with|via|through|powered by|built (on|with)|integrate[sd]? with)\b.{0,40}\b(tool|software|platform|app|service|api)\b/i,
     /\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s(?:tool|software|platform|app)\b/,
     /\b(monday\.com|hubspot|salesforce|zapier|ahrefs|semrush|moz|screaming frog|google analytics|mixpanel|amplitude)\b/i,
   ];
-  return toolPatterns.some((re) => re.test(text));
+  const matchCount = toolPatterns.filter((re) => re.test(text)).length;
+  // ✅ FIX: if 2+ patterns match, this paragraph is almost certainly a 
+  // dedicated tool-spotlight, not a passing mention — reject with higher confidence
+  return matchCount >= 1;
 }
 
 async function scrapeAndScore(url, anchor, keywords, isBranded = false, isToolTarget = false) {
@@ -619,20 +649,28 @@ async function scrapeAndScore(url, anchor, keywords, isBranded = false, isToolTa
     }
 
     const rawParagraphs = segmentParagraphs(article.content);
-    // STAGE A.1: POSITION CHECK — Exclude first 15% and last 15% (minimum: always exclude first 2 and last 2 if length permits)
+    // ✅ FIX: lowered threshold from 6 to 4, and added a minimum fallback 
+    // for very short articles (2-3 paragraphs) so first/last are never candidates
     let eligibleParagraphs = rawParagraphs;
-    if (rawParagraphs.length >= 6) {
-      const excludeCount = Math.max(2, Math.floor(rawParagraphs.length * 0.15));
+    if (rawParagraphs.length >= 4) {
+      const excludeCount = Math.max(1, Math.floor(rawParagraphs.length * 0.15));
       eligibleParagraphs = rawParagraphs.slice(excludeCount, rawParagraphs.length - excludeCount);
+    } else if (rawParagraphs.length >= 2) {
+      eligibleParagraphs = rawParagraphs.slice(1, -1);
+    } else {
+      eligibleParagraphs = []; // too short an article to safely place anything
     }
     const scored = [];
     const seen = new Set();
-    for (const { text, linkCount } of eligibleParagraphs) {
+    for (let i = 0; i < eligibleParagraphs.length; i++) {
+      const { text, linkCount } = eligibleParagraphs[i];
       if (seen.has(text)) continue;
       if (!isQualityParagraph(text, linkCount, isToolTarget)) continue;
       seen.add(text);
       const id = crypto.createHash('md5').update(url + text).digest('hex').slice(0, 10);
-      scored.push({ id, text, score: scoreParagraph(text, anchor, keywords, isBranded), url });
+      const prevText = eligibleParagraphs[i - 1] ? eligibleParagraphs[i - 1].text : null;
+      const nextText = eligibleParagraphs[i + 1] ? eligibleParagraphs[i + 1].text : null;
+      scored.push({ id, text, score: scoreParagraph(text, anchor, keywords, isBranded), url, prevText, nextText });
     }
     console.log(`[SCRAPE] ${scored.length} quality paragraphs from ${url}`);
     return scored;
