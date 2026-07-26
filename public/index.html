@@ -606,6 +606,7 @@
 
   <!-- Results -->
   <div class="result-section" id="result-section">
+    <div id="fallback-badge" style="display:none; background:rgba(250, 204, 21, 0.12); border:1px solid rgba(250, 204, 21, 0.4); color:var(--amber); padding:12px 16px; border-radius:var(--radius-sm); margin-bottom:20px; font-size:14px; line-height:1.5;"></div>
 
     <!-- Suggestion 1 -->
     <div class="result-card" id="suggestion-card-1">
@@ -710,6 +711,7 @@
 <script>
 let stepTimer, currentStep = 0;
 let _excludedParagraphs = []; // Track paragraphs already shown to user
+let _excludedArticleUrls = []; // Track article URLs already shown to user
 let _editPlainText = [null, null]; // Plain text for copy buttons
 let _lastSuccessfulResult = null; // Store for CSV export
 let _lastInputs = null; // Store for CSV export
@@ -728,29 +730,50 @@ function switchTab(tab) {
 }
 
 function startLoading() {
-  currentStep = 0;
-  document.getElementById('loading-card').classList.add('show');
-  for (let i = 0; i < 6; i++) {
-    const el = document.getElementById('step-' + i);
-    if (el) el.className = '';
-  }
-  document.getElementById('step-0').classList.add('active');
+  const card = document.getElementById('loading-card');
+  card.classList.add('show');
+  const bar = document.getElementById('progress-bar');
+  bar.style.width = '0%';
+
+  document.querySelectorAll('#steps-list li').forEach(li => {
+    li.className = '';
+  });
+  currentStep = 1;
+  updateStep(1, 'active');
+
+  let p = 0;
   stepTimer = setInterval(() => {
-    if (currentStep < 5) {
-      document.getElementById('step-' + currentStep).className = 'done';
-      currentStep++;
-      document.getElementById('step-' + currentStep).classList.add('active');
-    }
-  }, 2500);
+    p += 2;
+    if (p <= 90) bar.style.width = p + '%';
+    if (p === 20) { updateStep(1, 'done'); updateStep(2, 'active'); }
+    if (p === 45) { updateStep(2, 'done'); updateStep(3, 'active'); }
+    if (p === 70) { updateStep(3, 'done'); updateStep(4, 'active'); }
+    if (p === 85) { updateStep(4, 'done'); updateStep(5, 'active'); }
+  }, 300);
+}
+
+function updateStep(num, state) {
+  const li = document.getElementById('step-' + num);
+  if (li) li.className = state;
 }
 
 function stopLoading() {
   clearInterval(stepTimer);
-  for (let i = 0; i <= currentStep; i++) {
-    const el = document.getElementById('step-' + i);
-    if (el) el.className = 'done';
-  }
-  setTimeout(() => document.getElementById('loading-card').classList.remove('show'), 400);
+  document.getElementById('progress-bar').style.width = '100%';
+  for (let i = 1; i <= 5; i++) updateStep(i, 'done');
+  setTimeout(() => {
+    document.getElementById('loading-card').classList.remove('show');
+  }, 400);
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 function renderSuggestion(s, idx, anchor) {
@@ -801,11 +824,11 @@ function renderSuggestion(s, idx, anchor) {
   card.style.display = 'block';
 }
 
-async function callAPI(domain, anchor, altAnchor, linkto, excludedParagraphs, isBranded) {
+async function callAPI(domain, anchor, altAnchor, linkto, excludedParagraphs, isBranded, excludedArticleUrls) {
   const res = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ domain, anchor, altAnchor, linkto, excludedParagraphs, isBranded })
+    body: JSON.stringify({ domain, anchor, altAnchor, linkto, excludedParagraphs, isBranded, excludedArticleUrls })
   });
   const result = await res.json();
   if (!res.ok) throw new Error(result.error || 'Something went wrong');
@@ -813,8 +836,9 @@ async function callAPI(domain, anchor, altAnchor, linkto, excludedParagraphs, is
 }
 
 async function analyze(brandedFlag = false) {
-  // Reset excluded paragraphs on fresh analyze
+  // Reset excluded paragraphs and article URLs on fresh analyze
   _excludedParagraphs = [];
+  _excludedArticleUrls = [];
   await runAnalysis(false, brandedFlag);
 }
 
@@ -852,23 +876,37 @@ async function runAnalysis(isRegenerate = false, brandedFlag = false) {
   startLoading();
 
   try {
-    const result = await callAPI(domain, anchor, altAnchor, linkto, _excludedParagraphs, brandedFlag);
+    const result = await callAPI(domain, anchor, altAnchor, linkto, _excludedParagraphs, brandedFlag, _excludedArticleUrls);
     stopLoading();
 
     const suggestions = result.suggestions || [];
     if (!suggestions.length) throw new Error('No suggestions returned. Try again.');
 
-    // Track these paragraphs by their unique ID for future regenerate
+    // Track these paragraphs and article URLs for future regenerate
     for (const s of suggestions) {
       if (s.id && !_excludedParagraphs.includes(s.id)) {
         _excludedParagraphs.push(s.id);
       }
+      if (s.article_url && !_excludedArticleUrls.includes(s.article_url)) {
+        _excludedArticleUrls.push(s.article_url);
+      }
     }
 
-    suggestions.forEach((s, i) => renderSuggestion(s, i, anchor));
+    const actualAnchor = result.anchor_used || anchor;
+    suggestions.forEach((s, i) => renderSuggestion(s, i, actualAnchor));
+
+    const fbBadge = document.getElementById('fallback-badge');
+    if (fbBadge) {
+      if (result.was_fallback) {
+        fbBadge.style.display = 'block';
+        fbBadge.innerHTML = `⚠️ <b>Note:</b> Primary anchor ("${escapeHtml(result.original_anchor_requested || anchor)}") didn't find a placement — using alternate anchor <b>"${escapeHtml(actualAnchor)}"</b> instead.`;
+      } else {
+        fbBadge.style.display = 'none';
+      }
+    }
 
     _lastSuccessfulResult = result;
-    _lastInputs = { domain, anchor, altAnchor, linkto };
+    _lastInputs = { domain, anchor: actualAnchor, altAnchor, linkto };
 
     document.getElementById('result-section').classList.add('show');
     if (regenBtn) regenBtn.style.display = 'flex';
@@ -883,7 +921,7 @@ async function runAnalysis(isRegenerate = false, brandedFlag = false) {
   }
 
   btn.disabled = false;
-  btn.textContent = brandedFlag ? 'Find Branded Placement ↗' : 'Find Best Placement ↗';
+  btn.textContent = brandedFlag ? 'Generate Branded Placements' : 'Find Best Link Placements';
   if (regenBtn) regenBtn.disabled = false;
 }
 

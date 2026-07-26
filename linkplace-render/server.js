@@ -207,6 +207,44 @@ Rules:
   }
 }
 
+// ─── Multi-Anchor Variation Generation ─────────────────────────────────────────
+async function generateAnchorVariations(anchor, targetPageInfo) {
+  console.log(`[VARIATIONS] Generating anchor variations for "${anchor}"`);
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      signal: AbortSignal.timeout(12000),
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 200,
+        temperature: 0.3,
+        system: "You are an SEO expert. Return ONLY a JSON array of 10 strings, nothing else. No explanation, no backticks.",
+        messages: [{
+          role: "user",
+          content: `Given this anchor text: "${anchor}" and this target page topic summary: "${targetPageInfo?.summary || targetPageInfo?.title || ''}", generate exactly 10 natural alternative anchor phrases that could realistically link to the same destination page. Range from close synonyms to slightly broader related phrases. Each must sound natural if inserted into a sentence. Return ONLY a JSON array of 10 strings, nothing else.`
+        }],
+      }),
+    });
+    const data = await response.json();
+    if (data.error) throw new Error(data.error.message);
+    const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+    const cleanJson = text.replace(/^```json\s*|```\s*$/g, "").trim();
+    const arr = JSON.parse(cleanJson);
+    if (Array.isArray(arr) && arr.length > 0) {
+      console.log(`[VARIATIONS] Generated (${arr.length}): ${arr.slice(0, 5).join(", ")}`);
+      return arr.map(s => String(s).trim()).filter(Boolean);
+    }
+  } catch (err) {
+    console.log(`[VARIATIONS] Failed: ${err.message}`);
+  }
+  return [anchor];
+}
+
 // ─── Extract topic/type from linkto URL ──────────────────────────────────────
 async function analyzeLinktoPage(linkto) {
   console.log(`[LINKTO] Analyzing destination URL: ${linkto}`);
@@ -232,7 +270,8 @@ async function analyzeLinktoPage(linkto) {
     const isToolPage = toolIndicators.some((re) => re.test(snippet) || re.test(title));
 
     console.log(`[LINKTO] title="${title.slice(0, 60)}", isToolPage=${isToolPage}`);
-    return { title, snippet, isToolPage, keywords: extractKeywordsLocal(title + " " + snippet).slice(0, 15) };
+    const kws = extractKeywordsLocal(title + " " + snippet).slice(0, 15);
+    return { title, snippet, summary: snippet, isToolPage, keywords: kws, aiKeywords: kws };
   } catch (err) {
     console.log(`[LINKTO] Fetch failed: ${err.message}`);
     return extractLinktoFromSlug(linkto);
@@ -244,8 +283,9 @@ function extractLinktoFromSlug(linkto) {
     const slug = new URL(linkto).pathname.replace(/\//g, " ").replace(/-/g, " ").trim();
     const toolIndicators = [/\b(tool|software|platform|app|saas)\b/i];
     const isToolPage = toolIndicators.some((re) => re.test(slug));
-    return { title: slug, snippet: slug, isToolPage, keywords: extractKeywordsLocal(slug).slice(0, 10) };
-  } catch { return { title: "", snippet: "", isToolPage: false, keywords: [] }; }
+    const kws = extractKeywordsLocal(slug).slice(0, 10);
+    return { title: slug, snippet: slug, summary: slug, isToolPage, keywords: kws, aiKeywords: kws };
+  } catch { return { title: "", snippet: "", summary: "", isToolPage: false, keywords: [], aiKeywords: [] }; }
 }
 
 function isBlockedPage(html, statusCode) {
@@ -293,15 +333,17 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
     `site:${domain} ${keywords[0] || "software"}`,
     `site:${domain} ${keywords[1] || "tool"}`
   ] : [
-    `site:${domain} "${phrase}"`,
-    `site:${domain} ${phrase}`,
-    `site:${domain} ${keywords.slice(0, 2).join(" ")}`,
+    // ✅ FIX: Broad topical keywords FIRST — this finds mid-article discussion paragraphs
+    `site:${domain} ${keywords.slice(0, 3).join(" ")}`,
+    `site:${domain} ${keywords[0] || ""} ${keywords[1] || ""}`,
     `site:${domain} ${keywords[0] || "blog"}`,
+    // ✅ FIX: Exact anchor phrase now LAST — only used as a supplementary source,
+    // not the primary driver (this was causing intro-paragraph bias)
+    `site:${domain} "${phrase}"`,
   ];
 
   const allUrls = new Set();
   for (const query of queries) {
-    if (allUrls.size >= 6) break;
     console.log(`[SEARCH] Query: ${query}`);
     try {
       const controller = new AbortController();
@@ -317,7 +359,7 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
         if (r.link && r.link.includes(domain) && isArticleUrl(r.link)) allUrls.add(r.link);
       }
       console.log(`[SEARCH] Total valid URLs so far: ${allUrls.size}`);
-      if (allUrls.size >= 4) break;
+      // ✅ FIX: removed early break at 4/6 URLs — let all queries run so broader queries aren't starved by exact-phrase hits
     } catch (err) {
       console.log(`[SEARCH] Query failed: ${err.message}`);
     }
@@ -331,11 +373,24 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
 function extractArticleContent(html, url) {
   try {
     const dom = new JSDOM(html, { url });
-    // Remove comment and reply sections before extraction
-    dom.window.document.querySelectorAll('[class*="comment"], [id*="comment"], [class*="reply"], [id*="reply"], [class*="disqus"], [id*="disqus"]').forEach((el) => {
+    const doc = dom.window.document;
+    // Remove comment, reply, TOC, sidebar, index, and navigation sections before extraction
+    doc.querySelectorAll('[class*="comment" i], [id*="comment" i], [class*="reply" i], [id*="reply" i], [class*="disqus" i], [id*="disqus" i], [class*="toc" i], [id*="toc" i], [class*="table-of-content" i], [id*="table-of-content" i], [class*="contents" i], [id*="contents" i], [class*="sidebar" i], [id*="sidebar" i], [class*="widget" i], [id*="widget" i], [class*="menu" i], [id*="menu" i], [class*="nav" i], [id*="nav" i], [class*="index" i], [id*="index" i], [role="doc-toc" i], [role="navigation" i], [aria-label*="toc" i], [aria-label*="content" i], [aria-label*="navigation" i], nav, aside, footer, header').forEach((el) => {
       if (el && el.parentNode) el.parentNode.removeChild(el);
     });
-    const reader = new Readability(dom.window.document);
+    // Remove any containers or lists whose heading says Table of Contents, In this article, etc.
+    doc.querySelectorAll("h1, h2, h3, h4, h5, h6, p, div, span, strong, b, summary").forEach((h) => {
+      const txt = h.textContent.replace(/\s+/g, " ").trim();
+      if (/^(table of contents?|contents|in this article|on this page|quick jump|quick links|topics covered|what('s|\s+is)\s+inside|overview)\s*$/i.test(txt)) {
+        const wrapper = h.closest("nav, aside, section, details, div[class*='toc' i], div[id*='toc' i], div[class*='content' i], div[id*='content' i], div") || h.parentNode;
+        if (wrapper && wrapper.parentNode && wrapper !== doc.body && wrapper.textContent.length < 5000) {
+          wrapper.parentNode.removeChild(wrapper);
+        } else if (h.parentNode) {
+          h.parentNode.removeChild(h);
+        }
+      }
+    });
+    const reader = new Readability(doc);
     const article = reader.parse();
     if (!article || !article.content || article.textContent.length < 200) return null;
     console.log(`[EXTRACT] ${article.textContent.length} chars, title: "${article.title?.slice(0, 60)}"`);
@@ -352,10 +407,18 @@ function segmentParagraphs(articleHtml) {
     const dom = new JSDOM(articleHtml);
     const doc = dom.window.document;
     const paragraphs = [];
-    doc.querySelectorAll("p, li, blockquote, h2, h3, h4").forEach((el) => {
+    // Only real prose paragraphs and blockquotes qualify.
+    // Ignore any element inside lists (ul, ol, li), TOC, sidebar, menu, or navigation containers.
+    doc.querySelectorAll("p, blockquote").forEach((el) => {
+      if (el.closest("nav, aside, header, footer, ul, ol, li, [class*='toc' i], [id*='toc' i], [class*='table-of-content' i], [id*='table-of-content' i], [class*='content-list' i], [id*='content-list' i], [class*='sidebar' i], [id*='sidebar' i], [class*='menu' i], [id*='menu' i], [class*='widget' i], [id*='widget' i], [class*='index' i], [id*='index' i], [role='doc-toc' i], [role='navigation' i]")) {
+        return;
+      }
       const text = el.textContent.replace(/\s+/g, " ").trim();
       const linkCount = el.querySelectorAll("a").length;
-      if (text.length >= 50 && linkCount <= 3) paragraphs.push({ text, linkCount });
+      // Must be at least 100 chars, max 3 links, not starting with numbered bullet, and MUST end with sentence punctuation
+      if (text.length >= 100 && linkCount <= 3 && !/^\d+[\.\)]\s+/.test(text) && /[.!?]["']?\s*$/.test(text)) {
+        paragraphs.push({ text, linkCount });
+      }
     });
     return paragraphs;
   } catch (err) {
@@ -371,16 +434,18 @@ const NOISE_PATTERNS = [
   /follow us|share this|leave a comment/i,
   /cookie|privacy policy|terms of service|all rights reserved/i,
   /written by|posted by|about the author|you might also like|read next/i,
-  /table of contents|in this article|jump to section|skip to/i,
+  /table of contents|in this article|jump to section|skip to|table of content|toc\b/i,
 ];
 
 function isQualityParagraph(text, linkCount, isToolTarget = false) {
-  if (text.length < 50) return false;
+  if (text.length < 100) return false;
   if (linkCount > 0) return false; // STAGE A.2: Zero hyperlinks already
+  if (!/[.!?]["']?\s*$/.test(text)) return false; // Must be complete sentence(s) ending in punctuation
+  if (/^\d+[\.\)]\s+[A-Z]/.test(text) && text.length < 150) return false; // Reject numbered headings / TOC entries
   for (const pattern of NOISE_PATTERNS) { if (pattern.test(text)) return false; } // STAGE A.4: Not promotional/noise
   const capsRatio = (text.match(/[A-Z]/g) || []).length / text.length;
   if (capsRatio > 0.25) return false; // STAGE A.6: Not all-caps/heading noise
-  if (isToolTarget && mentionstool(text)) return false; // STAGE A.5: Not single-tool deep-dive when target is tool
+  if (mentionstool(text)) return false;
   return true;
 }
 
@@ -492,7 +557,18 @@ async function analyzeWithAI(paragraphs, anchor, linkto, linktoInfo, isBranded =
     return "TIER 3 (LAST RESORT related domain)";
   };
 
-  const paragraphText = finalPool.map((p, i) => `[${i + 1}] (Article: ${p.url}, Score: ${p.score ? p.score.toFixed(1) : 0} — ${getTierLabel(p.score || 0)})\n${p.text.slice(0, 1000)}`).join("\n\n---\n\n");
+  // ✅ FIX: include previous/next paragraph snippets so Haiku understands 
+  // the surrounding narrative flow, not just an isolated paragraph
+  const formatParagraphForAI = (p, idx) => {
+    const prevSnippet = p.prevText ? p.prevText.slice(0, 120) : "(none — start of eligible section)";
+    const nextSnippet = p.nextText ? p.nextText.slice(0, 120) : "(none — end of eligible section)";
+    return `[${idx}] (Article: ${p.url}, Score: ${p.score ? p.score.toFixed(1) : 0} — ${getTierLabel(p.score || 0)})
+Previous context: "...${prevSnippet}"
+PARAGRAPH: ${p.text}
+Next context: "${nextSnippet}..."`;
+  };
+
+  const paragraphText = finalPool.map((p, i) => formatParagraphForAI(p, i + 1)).join("\n\n---\n\n");
 
   const linktoBrief = linktoInfo?.title
     ? `Destination page topic: "${linktoInfo.title.slice(0, 100)}"`
@@ -510,7 +586,7 @@ Respond ONLY with valid JSON. No markdown, no backticks, no explanation outside 
   const userPrompt = `Anchor text to place: "${anchor}"
 ${linktoBrief}
 
-Analyze the paragraphs below. Pick the TWO best paragraphs from different articles where the anchor link can be placed organically.
+Analyze the paragraphs below. Pick the TWO best paragraphs where the anchor link can be placed organically (preferring different articles when possible).
 
 ═══════════════════════════════════════
 STAGE C — TIERED SELECTION LADDER
@@ -529,9 +605,14 @@ STAGE D — PLACEMENT & EDITING RULES
    a) Add ONE bridging sentence that connects the paragraph's subject to the target URL's topic. Must read naturally within flow.
    b) Do NOT change original meaning — only add/extend, never contradict or distort existing content.
    c) For Tier 2/3, use softer framing language ("for those who want to explore this further," "a related resource," "if you're looking to build this skill") rather than claiming the paragraph was already about the target topic.
+   d) VALIDATION CHECK — before finalizing any creative edit bridge, verify:
+      - The bridging sentence must NOT introduce any concept, entity, or claim that isn't already implied by the paragraph itself. Do not invent new scenarios (e.g., 'agile teams,' 'remote talent') that have no basis in the paragraph's actual content.
+      - The bridging sentence must NOT contradict or work against the article's own argument or title. If the article's core argument is 'you don't need X,' never insert a sentence implying 'X is now more accessible' as if it supports the same point — that is a logical contradiction, not a bridge.
+      - If you cannot write a bridge that passes both checks above, REJECT this paragraph entirely and move to the next candidate. Do not soften or water down a bad bridge — discard it.
+   e) SPECIFICITY CHECK — a bridging sentence must reference something SPECIFIC from the paragraph (a named concept, process, or challenge mentioned in that paragraph), not just the general topic of 'AI.' A bridge like 'benefits professionals seeking to master AI technologies' is too generic and should be rejected — it could apply to any AI-related paragraph on any site. Instead, the bridge must name the specific thing the paragraph discusses (e.g., a specific technique, challenge, or process) and explain concretely how the target URL relates to THAT specific thing.
 3. ABSOLUTE NON-IRRELEVANCE RULE: Do not place a link where the paragraph's broad subject domain has NO reasonable relation at all to the target URL (e.g., team lunch traditions linking to Python course).
 4. JUSTIFICATION FIELD (always required in "reason"): One sentence explaining the connection — for Tier 1 direct, for Tier 2/3 say honestly "adjacent topic, bridged via [reason]".
-5. CRITICAL: You MUST ALWAYS return exactly 2 suggestions from DIFFERENT articles (different URLs). Do NOT fail or return empty unless literally zero domain-level relation exists across all paragraphs.${brandedRule}
+5. Prefer suggestions from DIFFERENT articles when at least two articles have genuinely strong (Tier 1 or Tier 2) candidate paragraphs. However, relevance ALWAYS takes priority over diversity: if only ONE article has a Tier 1/2 quality match and no other article rises above Tier 3, it is completely acceptable to return 2 different paragraphs from that SAME article. Never sacrifice relevance quality or bridge validity (see rule 2d) just to satisfy article diversity. Only return fewer than 2 suggestions if genuinely nothing across all paragraphs meets even Tier 3 relevance.${brandedRule}
 
 Paragraphs:
 ${paragraphText}
@@ -589,13 +670,15 @@ Return this exact JSON with two suggestions:
 }
 
 function mentionstool(text) {
-  // Check if paragraph already mentions a competing tool/software
   const toolPatterns = [
     /\b(using|use|with|via|through|powered by|built (on|with)|integrate[sd]? with)\b.{0,40}\b(tool|software|platform|app|service|api)\b/i,
     /\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s(?:tool|software|platform|app)\b/,
     /\b(monday\.com|hubspot|salesforce|zapier|ahrefs|semrush|moz|screaming frog|google analytics|mixpanel|amplitude)\b/i,
   ];
-  return toolPatterns.some((re) => re.test(text));
+  const matchCount = toolPatterns.filter((re) => re.test(text)).length;
+  // ✅ FIX: if 2+ patterns match, this paragraph is almost certainly a 
+  // dedicated tool-spotlight, not a passing mention — reject with higher confidence
+  return matchCount >= 2;
 }
 
 async function scrapeAndScore(url, anchor, keywords, isBranded = false, isToolTarget = false) {
@@ -619,20 +702,28 @@ async function scrapeAndScore(url, anchor, keywords, isBranded = false, isToolTa
     }
 
     const rawParagraphs = segmentParagraphs(article.content);
-    // STAGE A.1: POSITION CHECK — Exclude first 15% and last 15% (minimum: always exclude first 2 and last 2 if length permits)
+    // ✅ FIX: lowered threshold from 6 to 4, and added a minimum fallback 
+    // for very short articles (2-3 paragraphs) so first/last are never candidates
     let eligibleParagraphs = rawParagraphs;
-    if (rawParagraphs.length >= 6) {
-      const excludeCount = Math.max(2, Math.floor(rawParagraphs.length * 0.15));
+    if (rawParagraphs.length >= 4) {
+      const excludeCount = Math.max(1, Math.floor(rawParagraphs.length * 0.15));
       eligibleParagraphs = rawParagraphs.slice(excludeCount, rawParagraphs.length - excludeCount);
+    } else if (rawParagraphs.length >= 2) {
+      eligibleParagraphs = rawParagraphs.slice(1, -1);
+    } else {
+      eligibleParagraphs = []; // too short an article to safely place anything
     }
     const scored = [];
     const seen = new Set();
-    for (const { text, linkCount } of eligibleParagraphs) {
+    for (let i = 0; i < eligibleParagraphs.length; i++) {
+      const { text, linkCount } = eligibleParagraphs[i];
       if (seen.has(text)) continue;
       if (!isQualityParagraph(text, linkCount, isToolTarget)) continue;
       seen.add(text);
       const id = crypto.createHash('md5').update(url + text).digest('hex').slice(0, 10);
-      scored.push({ id, text, score: scoreParagraph(text, anchor, keywords, isBranded), url });
+      const prevText = eligibleParagraphs[i - 1] ? eligibleParagraphs[i - 1].text : null;
+      const nextText = eligibleParagraphs[i + 1] ? eligibleParagraphs[i + 1].text : null;
+      scored.push({ id, text, score: scoreParagraph(text, anchor, keywords, isBranded), url, prevText, nextText });
     }
     console.log(`[SCRAPE] ${scored.length} quality paragraphs from ${url}`);
     return scored;
@@ -645,10 +736,10 @@ async function scrapeAndScore(url, anchor, keywords, isBranded = false, isToolTa
 // In-memory store for scraped paragraph pools (for regenerate without re-scraping)
 const paragraphPoolCache = new NodeCache({ stdTTL: 1800, checkperiod: 300, maxKeys: 200 });
 
-async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBranded = false) {
-  console.log(`[ANALYZE] domain=${domain}, anchor="${anchor}", excluded=${excludedParagraphs.length}, isBranded=${isBranded}`);
+async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBranded = false, excludedArticleUrls = []) {
+  console.log(`[ANALYZE] domain=${domain}, anchor="${anchor}", excluded=${excludedParagraphs.length}, excludedUrls=${excludedArticleUrls.length}, isBranded=${isBranded}`);
 
-  const poolKey = `pool::${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${isBranded}`;
+  const poolKey = `pool::${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${isBranded}::${excludedArticleUrls.length}`;
 
   let topParagraphs, allScored, filteredUrls, linktoInfo;
 
@@ -662,15 +753,16 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
     // Fresh run — full pipeline
 
     // STEP 1: Linkto page analysis -> AI keyword generation (sequential so AI gets context)
-    const lt = await analyzeLinktoPage(linkto);
-    linktoInfo = lt;
+    const targetPageInfo = await analyzeLinktoPage(linkto);
+    linktoInfo = targetPageInfo;
     const keywords = await generateKeywordsWithAI(anchor, linkto, linktoInfo, isBranded);
     console.log(`[LINKTO] isToolPage=${linktoInfo.isToolPage}, keywords=${linktoInfo.keywords.slice(0, 5).join(", ")}`);
 
-    const mergedKeywords = [...new Set([...keywords, ...linktoInfo.keywords])];
+    // Prioritize target-derived keywords over generic anchor words for query building
+    const searchKeywords = [...new Set([...(linktoInfo.aiKeywords || []), ...keywords, ...linktoInfo.keywords])];
 
     // STEP 2: Search
-    const urls = await searchArticles(domain, anchor, mergedKeywords, isBranded);
+    const urls = await searchArticles(domain, anchor, searchKeywords, isBranded);
     if (!urls.length) throw new Error("No articles found. Try a different domain or anchor text.");
 
     let linktoDomain = "";
@@ -692,7 +784,7 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
 
     // STEP 3: Parallel scrape
     const isToolTarget = linktoInfo?.isToolPage || false;
-    const scrapeResults = await Promise.allSettled(filteredUrls.map((url) => scrapeAndScore(url, anchor, mergedKeywords, isBranded, isToolTarget)));
+    const scrapeResults = await Promise.allSettled(filteredUrls.map((url) => scrapeAndScore(url, anchor, searchKeywords, isBranded, isToolTarget)));
     const paragraphsByUrl = {};
     let totalQuality = 0;
     let blockedCount = 0;
@@ -714,7 +806,7 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
     }
 
     // STEP 4: Context re-ranking — keep larger pool for regenerate
-    allScored = rerankWithContext(paragraphsByUrl, anchor, mergedKeywords);
+    allScored = rerankWithContext(paragraphsByUrl, anchor, searchKeywords);
     allScored.sort((a, b) => b.score - a.score);
     console.log(`[RANK] Top 5 scores: ${allScored.slice(0, 5).map((p) => p.score.toFixed(1)).join(", ")}`);
 
@@ -726,13 +818,15 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
     paragraphPoolCache.set(poolKey, { topParagraphs, allScored, filteredUrls, linktoInfo });
   }
 
-  // STEP 5: AI placement — exclude already-seen paragraphs
-  const available = topParagraphs.filter((p) => !excludedParagraphs.includes(p.id));
-
+  // STEP 5: AI placement — exclude already-seen paragraphs and excluded article URLs
+  let available = topParagraphs.filter((p) => !excludedParagraphs.includes(p.id) && !excludedArticleUrls.includes(p.url));
+  if (available.length < 2) {
+    available = allScored.filter((p) => !excludedParagraphs.includes(p.id) && !excludedArticleUrls.includes(p.url));
+  }
   console.log(`[RANK] Pool: ${topParagraphs.length}, available after exclusion: ${available.length}`);
 
-  // If too few left, fall back to topParagraphs but still try to diversify
-  const poolToUse = available.length >= 2 ? available : topParagraphs;
+  // If too few left, fall back to topParagraphs without URL exclusions so we don't return empty
+  const poolToUse = available.length >= 2 ? available : topParagraphs.filter((p) => !excludedParagraphs.includes(p.id));
 
   // Group by URL to ensure diversity
   const grouped = {};
@@ -941,23 +1035,36 @@ app.post("/api/find-anchor", async (req, res) => {
   });
 });
 
+app.post("/api/variations", async (req, res) => {
+  const { anchor, linkto } = req.body;
+  if (!anchor || !linkto) return res.status(400).json({ error: "Anchor and destination URL required." });
+  try {
+    const targetPageInfo = await analyzeLinktoPage(linkto);
+    const variations = await generateAnchorVariations(anchor, targetPageInfo);
+    return res.status(200).json({ variations });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/api/analyze", async (req, res) => {
   const rawDomain = req.body.domain || "";
   const domain = rawDomain.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
   const { anchor, altAnchor, linkto, isBranded } = req.body;
   const excludedParagraphs = Array.isArray(req.body.excludedParagraphs) ? req.body.excludedParagraphs : [];
+  const excludedArticleUrls = Array.isArray(req.body.excludedArticleUrls) ? req.body.excludedArticleUrls : [];
 
   const validationError = validateInputs(domain, anchor, linkto);
   if (validationError) return res.status(400).json({ error: validationError });
 
   // Use a secure hash to prevent cache collisions
-  const excludeHash = excludedParagraphs.length > 0
-    ? crypto.createHash("md5").update(excludedParagraphs.join("|")).digest("hex").slice(0, 16)
+  const excludeHash = (excludedParagraphs.length > 0 || excludedArticleUrls.length > 0)
+    ? crypto.createHash("md5").update([...excludedParagraphs, ...excludedArticleUrls].join("|")).digest("hex").slice(0, 16)
     : "0";
   const cacheKey = `${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${excludeHash}::${isBranded}`;
 
   // Only use cache for fresh requests (no exclusions) — regenerate always runs fresh
-  const useCache = excludedParagraphs.length === 0;
+  const useCache = excludedParagraphs.length === 0 && excludedArticleUrls.length === 0;
   const cached = useCache ? cache.get(cacheKey) : null;
   if (cached) { console.log(`[CACHE] Hit: ${cacheKey}`); return res.status(200).json({ ...cached, cached: true }); }
   if (inFlight.has(cacheKey)) {
@@ -966,22 +1073,55 @@ app.post("/api/analyze", async (req, res) => {
   }
 
   const attemptAnalysis = async () => {
-    try {
-      return await runAnalysis(domain, anchor, linkto, excludedParagraphs, isBranded);
-    } catch (err) {
-      if (altAnchor && excludedParagraphs.length === 0) {
-        console.log(`[FALLBACK] Primary anchor failed: ${err.message}. Retrying with alternate anchor: "${altAnchor}"`);
-        return await runAnalysis(domain, altAnchor, linkto, excludedParagraphs, isBranded);
-      }
-      throw err;
+    // Determine anchor list to try sequentially
+    let anchorList = [];
+    if (Array.isArray(req.body.selectedAnchors) && req.body.selectedAnchors.length > 0) {
+      anchorList = req.body.selectedAnchors;
+    } else {
+      anchorList = [anchor];
+      if (altAnchor && !anchorList.includes(altAnchor)) anchorList.push(altAnchor);
     }
+
+    // If only 1-2 anchors and fresh analysis without exclusions, auto-generate top 4 variations as fallback pool
+    if (anchorList.length <= 2 && excludedParagraphs.length === 0 && excludedArticleUrls.length === 0) {
+      try {
+        const targetPageInfo = await analyzeLinktoPage(linkto);
+        const variations = await generateAnchorVariations(anchor, targetPageInfo);
+        for (const v of variations) {
+          if (anchorList.length >= 4) break;
+          if (!anchorList.includes(v)) anchorList.push(v);
+        }
+      } catch (err) {
+        console.log(`[VARIATIONS] Auto-select fallback failed: ${err.message}`);
+      }
+    }
+
+    let lastError = null;
+    for (const currentAnchor of anchorList) {
+      try {
+        console.log(`[FALLBACK] Attempting analysis with anchor: "${currentAnchor}"`);
+        const result = await runAnalysis(domain, currentAnchor, linkto, excludedParagraphs, isBranded, excludedArticleUrls);
+        if (result && result.length > 0) {
+          return {
+            suggestions: result,
+            anchor_used: currentAnchor,
+            was_fallback: currentAnchor !== anchorList[0],
+            original_anchor_requested: anchorList[0]
+          };
+        }
+      } catch (err) {
+        console.log(`[FALLBACK] Anchor "${currentAnchor}" failed: ${err.message}, trying next...`);
+        lastError = err;
+      }
+    }
+    throw lastError || new Error("No valid placement found across any anchor variation");
   };
 
   const promise = attemptAnalysis().finally(() => inFlight.delete(cacheKey));
   inFlight.set(cacheKey, promise);
   try {
     const results = await promise;
-    const response = { suggestions: results, cached: false };
+    const response = { ...results, cached: false };
     cache.set(cacheKey, response);
     return res.status(200).json(response);
   } catch (err) {
@@ -994,3 +1134,5 @@ app.post("/api/analyze", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`LinkPlace v3 running on port ${PORT}`));
+
+module.exports = { app, runAnalysis, searchArticles, scrapeAndScore, generateAnchorVariations, analyzeLinktoPage };
