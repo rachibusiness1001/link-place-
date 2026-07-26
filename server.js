@@ -374,12 +374,13 @@ const NOISE_PATTERNS = [
   /table of contents|in this article|jump to section|skip to/i,
 ];
 
-function isQualityParagraph(text, linkCount) {
+function isQualityParagraph(text, linkCount, isToolTarget = false) {
   if (text.length < 50) return false;
-  if (linkCount > 0) return false; // Skip paragraphs that already have any link
-  for (const pattern of NOISE_PATTERNS) { if (pattern.test(text)) return false; }
+  if (linkCount > 0) return false; // STAGE A.2: Zero hyperlinks already
+  for (const pattern of NOISE_PATTERNS) { if (pattern.test(text)) return false; } // STAGE A.4: Not promotional/noise
   const capsRatio = (text.match(/[A-Z]/g) || []).length / text.length;
-  if (capsRatio > 0.25) return false;
+  if (capsRatio > 0.25) return false; // STAGE A.6: Not all-caps/heading noise
+  if (isToolTarget && mentionstool(text)) return false; // STAGE A.5: Not single-tool deep-dive when target is tool
   return true;
 }
 
@@ -394,7 +395,7 @@ function computeTfIdfScore(text, keywords) {
     const kwFreq = freq[kw] || 0;
     if (kwFreq > 0) { const specificity = Math.min(kw.length / 5, 2.5); score += specificity * (1 + Math.log(kwFreq)); }
   }
-  return (score / Math.sqrt(Math.max(wordCount, 1))) * 10;
+  return Math.min(30, (score / Math.sqrt(Math.max(wordCount, 1))) * 15); // STAGE B: Topic relevance (0-30)
 }
 
 function scoreParagraph(text, anchor, keywords, isBranded = false) {
@@ -403,7 +404,7 @@ function scoreParagraph(text, anchor, keywords, isBranded = false) {
   let score = 0;
 
   if (!isBranded) {
-    if (lower.includes(anchorLower)) score += 60;
+    if (lower.includes(anchorLower)) score += 60; // STAGE B: +60 Exact anchor phrase
     else {
       const anchorWords = anchorLower.split(/\s+/).filter((w) => w.length > 3);
       if (anchorWords.length >= 2) {
@@ -412,25 +413,22 @@ function scoreParagraph(text, anchor, keywords, isBranded = false) {
           bigrams.push(`${anchorWords[i]} ${anchorWords[i + 1]}`);
         }
         for (const bg of bigrams) {
-          if (lower.includes(bg)) score += 20;
+          if (lower.includes(bg)) score += 20; // STAGE B: +20 Partial/bigram match
         }
       }
     }
   } else {
-    // In branded mode, we strictly care about keyword/topic relevance, not if the brand is mentioned.
     score += 40; 
   }
 
-  score += computeTfIdfScore(text, keywords);
+  score += computeTfIdfScore(text, keywords); // STAGE B: +X Topic relevance (0-30)
   const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 20);
   const wordCount = text.split(/\s+/).length;
-  if (sentences.length >= 3) score += 15;
-  else if (sentences.length >= 2) score += 8;
-  if (wordCount >= 80 && wordCount <= 300) score += 12;
-  else if (wordCount >= 50) score += 5;
-  else if (wordCount < 40) score -= 15;
+  if (sentences.length >= 3 && wordCount >= 80 && wordCount <= 300) score += 15; // STAGE B: +15 Ideal length
+  else if (sentences.length >= 2 && wordCount >= 50) score += 8;
+  if (wordCount < 40) score -= 15; // STAGE B: -15 Too short under 40 words
   const promoRe = /\b(buy|sale|discount|offer|deal|click|subscribe|download now|sign up|free trial|book a demo)\b/gi;
-  score -= (text.match(promoRe) || []).length * 15;
+  score -= (text.match(promoRe) || []).length * 15; // STAGE B: -15 Contains promotional words
   const capsRatio = (text.match(/[A-Z]/g) || []).length / text.length;
   if (capsRatio < 0.1) score += 8;
   else if (capsRatio > 0.2) score -= 10;
@@ -445,11 +443,13 @@ function rerankWithContext(allParagraphsByUrl, anchor, keywords) {
       const p = paragraphs[i];
       const neighbors = [paragraphs[i - 1], paragraphs[i + 1]].filter(Boolean);
       let contextBonus = 0;
+      let neighborRelates = false;
       for (const n of neighbors) {
-        if (n.text.toLowerCase().includes(anchorLower)) contextBonus += 10;
+        if (n.text.toLowerCase().includes(anchorLower)) neighborRelates = true;
         const kwHits = keywords.filter((k) => k.length > 4 && n.text.toLowerCase().includes(k)).length;
-        contextBonus += Math.min(kwHits * 2, 12);
+        if (kwHits >= 1) neighborRelates = true;
       }
+      if (neighborRelates) contextBonus += 10; // STAGE B: +10 Neighboring paragraphs also relate
       result.push({ ...p, score: p.score + contextBonus, url });
     }
   }
@@ -486,32 +486,52 @@ async function analyzeWithAI(paragraphs, anchor, linkto, linktoInfo, isBranded =
 
   const finalPool = (pool.length >= 4 ? pool : paragraphs).slice(0, 12);
 
-  const paragraphText = finalPool.map((p, i) => `[${i + 1}] (Article: ${p.url})\n${p.text.slice(0, 1000)}`).join("\n\n---\n\n");
+  const getTierLabel = (score) => {
+    if (score >= 45) return "TIER 1 (STRONG match)";
+    if (score >= 25) return "TIER 2 (MODERATE match)";
+    return "TIER 3 (LAST RESORT related domain)";
+  };
+
+  const paragraphText = finalPool.map((p, i) => `[${i + 1}] (Article: ${p.url}, Score: ${p.score ? p.score.toFixed(1) : 0} — ${getTierLabel(p.score || 0)})\n${p.text.slice(0, 1000)}`).join("\n\n---\n\n");
 
   const linktoBrief = linktoInfo?.title
     ? `Destination page topic: "${linktoInfo.title.slice(0, 100)}"`
     : `Destination URL: ${linkto}`;
 
   const brandedRule = isBranded
-    ? "\n- BRANDED ANCHOR: The anchor is a brand/company name. You must evaluate the Destination page topic. If no paragraph perfectly matches, find the most related paragraph and APPEND or EDIT a sentence to seamlessly introduce the brand and its relevance to the topic."
-    : "\n- Edit ONLY one sentence per paragraph — use [[ANCHOR]] placeholder. If the exact anchor doesn't perfectly fit naturally, creatively rewrite or add to a sentence.";
+    ? "\n- BRANDED ANCHOR: The anchor is a brand/company name. Evaluate Destination page topic. If no paragraph perfectly matches, find the most related paragraph and APPEND or EDIT a sentence to seamlessly introduce the brand and its relevance to the topic."
+    : "";
 
   const systemPrompt = `You are an expert SEO editor placing contextual internal links in blog articles.
 Your goal is to seamlessly insert an anchor link into a paragraph so that it reads 100% naturally, as if written by the original author.
-Never force a link into an irrelevant context. If the paragraph is only slightly related, creatively edit the text or add a sentence to bridge the topics.
+Never force a link into an irrelevant context. If the paragraph is only slightly related, creatively edit the text or add a bridging sentence.
 Respond ONLY with valid JSON. No markdown, no backticks, no explanation outside JSON.`;
 
   const userPrompt = `Anchor text to place: "${anchor}"
 ${linktoBrief}
 
 Analyze the paragraphs below. Pick the TWO best paragraphs from different articles where the anchor link can be placed organically.
-Rules:${brandedRule}
-- TARGET URL ALIGNMENT: You must analyze the Destination page topic. The placement MUST make sense for a user to click and read that destination.
-- NATURAL PLACEMENT FIRST: Try to find a paragraph where the placement fits naturally. 
-- CREATIVE EDITING (FALLBACK): If a natural placement isn't immediately available, pick the most relevant paragraph and seamlessly edit the text or append a sentence to logically bridge the paragraph's topic with the destination URL.
-- CRITICAL: DO NOT forcefully inject the anchor into a paragraph that discusses a completely unrelated topic (e.g., injecting an invoice tool into a social media paragraph).
-- You MUST ALWAYS return exactly 2 suggestions. Do NOT fail or return empty.
-- Suggestions MUST be from DIFFERENT articles (different URLs)
+
+═══════════════════════════════════════
+STAGE C — TIERED SELECTION LADDER
+═══════════════════════════════════════
+ALWAYS pick from the highest tier that has candidate paragraphs available in the list below:
+- TIER 1 (score ≥ 45): STRONG match. Use natural fit or light creative edit. High confidence placement.
+- TIER 2 (score 25–44): MODERATE match — topic is adjacent/related but not a perfect overlap. Use creative edit to bridge the connection. This is normal and expected, NOT a failure state. Write the bridging sentence so it reads as a natural, helpful addition (e.g., "for readers who want to go deeper into X, [anchor] covers...").
+- TIER 3 (score < 25): LAST RESORT tier — paragraph discusses a genuinely related broad domain (same industry/skill/technology family) but not a close match. Use creative edit to bridge. Frame the link as a helpful related resource/next-step rather than claiming direct topical overlap (e.g., "on a related note," "for those looking to build this skill further,"). Only use if Tier 1 and Tier 2 have zero candidates.
+ONLY return failure if literally nothing touches the target URL's broad subject area at all (e.g., a cooking recipe for an AI software target).
+
+═══════════════════════════════════════
+STAGE D — PLACEMENT & EDITING RULES
+═══════════════════════════════════════
+1. NATURAL FIT FIRST: if anchor phrase already fits an existing sentence without changing meaning, use minimal edit.
+2. CREATIVE EDIT (default for Tier 2/3, allowed for Tier 1 too):
+   a) Add ONE bridging sentence that connects the paragraph's subject to the target URL's topic. Must read naturally within flow.
+   b) Do NOT change original meaning — only add/extend, never contradict or distort existing content.
+   c) For Tier 2/3, use softer framing language ("for those who want to explore this further," "a related resource," "if you're looking to build this skill") rather than claiming the paragraph was already about the target topic.
+3. ABSOLUTE NON-IRRELEVANCE RULE: Do not place a link where the paragraph's broad subject domain has NO reasonable relation at all to the target URL (e.g., team lunch traditions linking to Python course).
+4. JUSTIFICATION FIELD (always required in "reason"): One sentence explaining the connection — for Tier 1 direct, for Tier 2/3 say honestly "adjacent topic, bridged via [reason]".
+5. CRITICAL: You MUST ALWAYS return exactly 2 suggestions from DIFFERENT articles (different URLs). Do NOT fail or return empty unless literally zero domain-level relation exists across all paragraphs.${brandedRule}
 
 Paragraphs:
 ${paragraphText}
@@ -522,7 +542,7 @@ Return this exact JSON with two suggestions:
       "paragraph": "full original paragraph text here",
       "suggested_sentence": "original sentence before edit",
       "suggested_edit": "edited sentence with [[ANCHOR]] placed naturally",
-      "reason": "one sentence explaining why",
+      "reason": "one sentence explaining connection (e.g. Tier 2 adjacent topic, bridged via X)",
       "relevance_score": 85,
       "naturalness_score": 90
     },
@@ -530,7 +550,7 @@ Return this exact JSON with two suggestions:
       "paragraph": "full original paragraph text here",
       "suggested_sentence": "original sentence before edit",
       "suggested_edit": "edited sentence with [[ANCHOR]] placed naturally",
-      "reason": "one sentence explaining why",
+      "reason": "one sentence explaining connection",
       "relevance_score": 78,
       "naturalness_score": 82
     }
@@ -578,7 +598,7 @@ function mentionstool(text) {
   return toolPatterns.some((re) => re.test(text));
 }
 
-async function scrapeAndScore(url, anchor, keywords, isBranded = false) {
+async function scrapeAndScore(url, anchor, keywords, isBranded = false, isToolTarget = false) {
   console.log(`[SCRAPE] Fetching ${url}`);
   try {
     const { html, status } = await fetchWithRetry(url, 2, 18000);
@@ -599,11 +619,17 @@ async function scrapeAndScore(url, anchor, keywords, isBranded = false) {
     }
 
     const rawParagraphs = segmentParagraphs(article.content);
+    // STAGE A.1: POSITION CHECK — Exclude first 15% and last 15% (minimum: always exclude first 2 and last 2 if length permits)
+    let eligibleParagraphs = rawParagraphs;
+    if (rawParagraphs.length >= 6) {
+      const excludeCount = Math.max(2, Math.floor(rawParagraphs.length * 0.15));
+      eligibleParagraphs = rawParagraphs.slice(excludeCount, rawParagraphs.length - excludeCount);
+    }
     const scored = [];
     const seen = new Set();
-    for (const { text, linkCount } of rawParagraphs) {
+    for (const { text, linkCount } of eligibleParagraphs) {
       if (seen.has(text)) continue;
-      if (!isQualityParagraph(text, linkCount)) continue;
+      if (!isQualityParagraph(text, linkCount, isToolTarget)) continue;
       seen.add(text);
       const id = crypto.createHash('md5').update(url + text).digest('hex').slice(0, 10);
       scored.push({ id, text, score: scoreParagraph(text, anchor, keywords, isBranded), url });
@@ -655,7 +681,8 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
     console.log(`[SEARCH] Using ${filteredUrls.length} articles: ${filteredUrls.join(", ")}`);
 
     // STEP 3: Parallel scrape
-    const scrapeResults = await Promise.allSettled(filteredUrls.map((url) => scrapeAndScore(url, anchor, mergedKeywords, isBranded)));
+    const isToolTarget = linktoInfo?.isToolPage || false;
+    const scrapeResults = await Promise.allSettled(filteredUrls.map((url) => scrapeAndScore(url, anchor, mergedKeywords, isBranded, isToolTarget)));
     const paragraphsByUrl = {};
     let totalQuality = 0;
     let blockedCount = 0;
@@ -681,9 +708,8 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
     allScored.sort((a, b) => b.score - a.score);
     console.log(`[RANK] Top 5 scores: ${allScored.slice(0, 5).map((p) => p.score.toFixed(1)).join(", ")}`);
 
-    const qualified = allScored.filter((p) => p.score >= 5);
-    // Keep up to 30 paragraphs in pool so regenerate has fresh ones
-    topParagraphs = (qualified.length >= 3 ? qualified : allScored).slice(0, 30);
+    // STAGE C: Tiered Selection — keep top 30 without discarding lower tier scores
+    topParagraphs = allScored.slice(0, 30);
     console.log(`[POOL] Storing ${topParagraphs.length} paragraphs for potential regenerate`);
 
     // Cache the pool for regenerate
