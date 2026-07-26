@@ -461,6 +461,15 @@
   .btn-regenerate:hover { background: rgba(124,109,250,0.08); border-color: var(--accent); }
   .btn-regenerate:disabled { opacity: 0.4; cursor: not-allowed; }
   .btn-regenerate svg { flex-shrink: 0; }
+
+  /* Anchor Variations Chips & Fallback UI */
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s ease; border: 1px solid var(--border); background: var(--bg2); color: var(--text1); user-select: none; }
+  .chip.option:hover { border-color: var(--accent); background: rgba(124,109,250,0.1); }
+  .chip.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .chip.pinned { background: rgba(16,185,129,0.15); border-color: #10b981; color: #10b981; cursor: default; }
+  .chip .badge { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(0,0,0,0.2); color: inherit; font-size: 11px; font-weight: 700; }
+  .chip .reorder-btn { display: inline-flex; align-items: center; justify-content: center; padding: 2px 5px; border-radius: 4px; font-size: 11px; color: inherit; opacity: 0.8; background: rgba(0,0,0,0.15); border: none; cursor: pointer; }
+  .chip .reorder-btn:hover { opacity: 1; background: rgba(0,0,0,0.3); }
 </style>
 </head>
 <body>
@@ -528,7 +537,24 @@
         <div class="field-hint">Automatically used if no placement is found for the primary anchor.</div>
       </div>
 
-      <button class="btn-primary" id="analyze-btn" onclick="analyze()">
+      <!-- NEW VARIATIONS UI SECTION FOR NORMAL -->
+      <div style="margin-top: 20px; border-top: 1px dashed var(--border); padding-top: 16px;">
+        <button type="button" class="btn-regenerate" style="margin-top: 0; background: rgba(124,109,250,0.1); border-color: var(--accent);" id="gen-var-btn" onclick="generateVariationsUI('')">
+          ✨ Generate 10 AI Anchor Variations (Sequential Fallback)
+        </button>
+        <div id="variations-box" style="display:none; margin-top:16px; padding:16px; background:var(--bg3); border:1px solid var(--border); border-radius:10px; text-align:left;">
+          <div style="font-size:13px; font-weight:600; color:var(--text1); margin-bottom:4px;">Select 3-4 Anchor Variations (Ordered Fallback Sequence):</div>
+          <div style="font-size:12px; color:var(--text2); margin-bottom:12px; line-height:1.4;">If your primary anchor doesn't find a placement, the system will automatically try these next, in the order arranged. Click options below to add or remove them.</div>
+          
+          <div style="font-size:12px; font-weight:600; color:var(--accent); margin-bottom:6px;">Selected Fallback Sequence:</div>
+          <div id="selected-sequence" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; min-height:36px; padding:10px; background:var(--bg2); border-radius:8px; border:1px dashed var(--border);"></div>
+
+          <div style="font-size:12px; font-weight:600; color:var(--text2); margin-bottom:6px;">Available AI Suggestions (Click to select/reorder):</div>
+          <div id="available-chips" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+        </div>
+      </div>
+
+      <button class="btn-primary" id="analyze-btn" onclick="analyze()" style="margin-top: 20px;">
         Find Best Placement ↗
       </button>
       <div class="error-box" id="error-box"></div>
@@ -573,7 +599,24 @@
         </div>
       </div>
 
-      <button class="btn-primary" id="analyze-btn-branded" onclick="analyze(true)">
+      <!-- NEW VARIATIONS UI SECTION FOR BRANDED -->
+      <div style="margin-top: 20px; border-top: 1px dashed var(--border); padding-top: 16px;">
+        <button type="button" class="btn-regenerate" style="margin-top: 0; background: rgba(124,109,250,0.1); border-color: var(--accent);" id="gen-var-btn-branded" onclick="generateVariationsUI('-branded')">
+          ✨ Generate 10 AI Anchor Variations (Sequential Fallback)
+        </button>
+        <div id="variations-box-branded" style="display:none; margin-top:16px; padding:16px; background:var(--bg3); border:1px solid var(--border); border-radius:10px; text-align:left;">
+          <div style="font-size:13px; font-weight:600; color:var(--text1); margin-bottom:4px;">Select 3-4 Anchor Variations (Ordered Fallback Sequence):</div>
+          <div style="font-size:12px; color:var(--text2); margin-bottom:12px; line-height:1.4;">If your primary anchor doesn't find a placement, the system will automatically try these next, in the order arranged. Click options below to add or remove them.</div>
+          
+          <div style="font-size:12px; font-weight:600; color:var(--accent); margin-bottom:6px;">Selected Fallback Sequence:</div>
+          <div id="selected-sequence-branded" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; min-height:36px; padding:10px; background:var(--bg2); border-radius:8px; border:1px dashed var(--border);"></div>
+
+          <div style="font-size:12px; font-weight:600; color:var(--text2); margin-bottom:6px;">Available AI Suggestions (Click to select/reorder):</div>
+          <div id="available-chips-branded" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+        </div>
+      </div>
+
+      <button class="btn-primary" id="analyze-btn-branded" onclick="analyze(true)" style="margin-top: 20px;">
         Find Branded Placement ↗
       </button>
       <div class="error-box" id="error-box-branded"></div>
@@ -824,15 +867,123 @@ function renderSuggestion(s, idx, anchor) {
   card.style.display = 'block';
 }
 
-async function callAPI(domain, anchor, altAnchor, linkto, excludedParagraphs, isBranded, excludedArticleUrls) {
+async function callAPI(domain, anchor, altAnchor, linkto, excludedParagraphs, isBranded, excludedArticleUrls, anchors) {
   const res = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ domain, anchor, altAnchor, linkto, excludedParagraphs, isBranded, excludedArticleUrls })
+    body: JSON.stringify({ domain, anchor, altAnchor, anchors, linkto, excludedParagraphs, isBranded, excludedArticleUrls })
   });
   const result = await res.json();
-  if (!res.ok) throw new Error(result.error || 'Something went wrong');
+  if (!res.ok) {
+    const errorObj = new Error(result.message || result.error || 'Something went wrong');
+    errorObj.code = result.error;
+    errorObj.suggestion = result.suggestion;
+    errorObj.anchors_tried = result.anchors_tried;
+    throw errorObj;
+  }
   return result;
+}
+
+let _selectedVariations = { '': [], '-branded': [] };
+let _allVariations = { '': [], '-branded': [] };
+
+async function generateVariationsUI(suffix) {
+  const anchor = document.getElementById('anchor' + suffix).value.trim();
+  const linkto = document.getElementById('linkto' + suffix).value.trim();
+  const errBox = document.getElementById('error-box' + suffix);
+  errBox.classList.remove('show');
+  
+  if (!anchor || !linkto) {
+    errBox.innerHTML = 'Please fill in Anchor text and Link to (destination URL) first to generate variations.';
+    errBox.classList.add('show');
+    return;
+  }
+
+  const btn = document.getElementById('gen-var-btn' + suffix);
+  const oldText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Generating 10 variations...';
+
+  try {
+    const res = await fetch('/api/generate-anchor-variations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ anchor, linkto })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to generate variations');
+    
+    _allVariations[suffix] = data.variations || [];
+    _selectedVariations[suffix] = []; // Start with none selected (user must select explicitly per STEP 2)
+    
+    renderVariationsBox(suffix);
+    document.getElementById('variations-box' + suffix).style.display = 'block';
+  } catch (err) {
+    errBox.innerHTML = 'Error generating variations: ' + escapeHtml(err.message);
+    errBox.classList.add('show');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = oldText;
+  }
+}
+
+function toggleVariation(val, suffix) {
+  const list = _selectedVariations[suffix];
+  const idx = list.indexOf(val);
+  if (idx >= 0) {
+    list.splice(idx, 1);
+  } else {
+    list.push(val);
+  }
+  renderVariationsBox(suffix);
+}
+
+function reorderVariation(idx, direction, suffix) {
+  const list = _selectedVariations[suffix];
+  if (direction === 'up' && idx > 0) {
+    const temp = list[idx - 1];
+    list[idx - 1] = list[idx];
+    list[idx] = temp;
+  } else if (direction === 'down' && idx < list.length - 1) {
+    const temp = list[idx + 1];
+    list[idx + 1] = list[idx];
+    list[idx] = temp;
+  }
+  renderVariationsBox(suffix);
+}
+
+function renderVariationsBox(suffix) {
+  const anchor = document.getElementById('anchor' + suffix).value.trim();
+  const selContainer = document.getElementById('selected-sequence' + suffix);
+  const availContainer = document.getElementById('available-chips' + suffix);
+  const list = _selectedVariations[suffix];
+  const all = _allVariations[suffix];
+
+  let selHtml = `<div class="chip pinned" title="Pinned Primary Anchor"><span class="badge">1</span> <span class="txt">${escapeHtml(anchor)}</span> <span style="font-size:10px; opacity:0.8;">(Primary - Pinned)</span></div>`;
+  list.forEach((val, i) => {
+    selHtml += `<div class="chip selected" onclick="toggleVariation('${escapeHtml(val)}', '${suffix}')" title="Click to remove">
+      <span class="badge">${i + 2}</span> 
+      <span class="txt">${escapeHtml(val)}</span>
+      <span style="display:inline-flex; gap:2px; margin-left:4px;" onclick="event.stopPropagation();">
+        ${i > 0 ? `<button type="button" class="reorder-btn" onclick="reorderVariation(${i}, 'up', '${suffix}'); event.stopPropagation();">↑</button>` : ''}
+        ${i < list.length - 1 ? `<button type="button" class="reorder-btn" onclick="reorderVariation(${i}, 'down', '${suffix}'); event.stopPropagation();">↓</button>` : ''}
+      </span>
+      <span style="margin-left:4px; font-weight:bold;">×</span>
+    </div>`;
+  });
+  selContainer.innerHTML = selHtml;
+
+  let availHtml = '';
+  all.forEach((val) => {
+    if (val.toLowerCase() === anchor.toLowerCase()) return;
+    const isSel = list.includes(val);
+    availHtml += `<div class="chip option ${isSel ? 'selected' : ''}" onclick="toggleVariation('${escapeHtml(val)}', '${suffix}')">
+      <span class="txt">${escapeHtml(val)}</span>
+      ${isSel ? '<span style="margin-left:4px;">✓</span>' : '<span style="margin-left:4px; opacity:0.5;">+</span>'}
+    </div>`;
+  });
+  if (!availHtml) availHtml = `<div style="color:var(--text3); font-size:12px;">No additional variations generated.</div>`;
+  availContainer.innerHTML = availHtml;
 }
 
 async function analyze(brandedFlag = false) {
@@ -876,7 +1027,15 @@ async function runAnalysis(isRegenerate = false, brandedFlag = false) {
   startLoading();
 
   try {
-    const result = await callAPI(domain, anchor, altAnchor, linkto, _excludedParagraphs, brandedFlag, _excludedArticleUrls);
+    let anchors = undefined;
+    if (_selectedVariations[suffix] && _selectedVariations[suffix].length > 0) {
+      anchors = [anchor, ..._selectedVariations[suffix]];
+    } else if (altAnchor) {
+      anchors = [anchor, altAnchor];
+    } else {
+      anchors = [anchor];
+    }
+    const result = await callAPI(domain, anchor, altAnchor, linkto, _excludedParagraphs, brandedFlag, _excludedArticleUrls, anchors);
     stopLoading();
 
     const suggestions = result.suggestions || [];
@@ -899,7 +1058,9 @@ async function runAnalysis(isRegenerate = false, brandedFlag = false) {
     if (fbBadge) {
       if (result.was_fallback) {
         fbBadge.style.display = 'block';
-        fbBadge.innerHTML = `⚠️ <b>Note:</b> Primary anchor ("${escapeHtml(result.original_anchor_requested || anchor)}") didn't find a placement — using alternate anchor <b>"${escapeHtml(actualAnchor)}"</b> instead.`;
+        const orig = result.original_anchor_requested || anchor;
+        const triedCount = Array.isArray(result.anchors_tried_before_success) ? result.anchors_tried_before_success.length : 1;
+        fbBadge.innerHTML = `⚠️ <b>Note:</b> your primary anchor <b>'${escapeHtml(orig)}'</b> didn't find a suitable placement. We tried ${triedCount} other option(s) and found a placement using: <b>'${escapeHtml(actualAnchor)}'</b> instead.`;
       } else {
         fbBadge.style.display = 'none';
       }
@@ -916,7 +1077,15 @@ async function runAnalysis(isRegenerate = false, brandedFlag = false) {
   } catch (err) {
     stopLoading();
     document.getElementById('loading-card').classList.remove('show');
-    document.getElementById('error-box' + suffix).textContent = 'Error: ' + (err.message || 'Something went wrong. Please try again.');
+    let errMsg = err.message || 'Something went wrong. Please try again.';
+    if (err.suggestion) {
+      errMsg += `<br><br><b style="color:var(--text1);">💡 Suggestion:</b> ${escapeHtml(err.suggestion)}`;
+      errMsg += `<br><br><button type="button" class="btn-regenerate" style="margin-top:8px; width:auto; padding:6px 14px;" onclick="generateVariationsUI('${suffix}')">✨ Regenerate AI Variations</button>`;
+    }
+    if (err.anchors_tried && Array.isArray(err.anchors_tried)) {
+      errMsg += `<br><br><b style="color:var(--text2);">Tried Anchors (${err.anchors_tried.length}):</b> <span style="color:var(--text3);">${err.anchors_tried.map(a => `'${escapeHtml(a)}'`).join(', ')}</span>`;
+    }
+    document.getElementById('error-box' + suffix).innerHTML = 'Error: ' + errMsg;
     document.getElementById('error-box' + suffix).classList.add('show');
   }
 

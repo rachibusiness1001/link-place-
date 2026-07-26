@@ -208,8 +208,8 @@ Rules:
 }
 
 // ─── Multi-Anchor Variation Generation ─────────────────────────────────────────
-async function generateAnchorVariations(anchor, targetPageInfo) {
-  console.log(`[VARIATIONS] Generating anchor variations for "${anchor}"`);
+async function generateAnchorVariations(originalAnchor, targetPageInfo) {
+  console.log(`[VARIATIONS] Generating anchor variations for "${originalAnchor}"`);
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -221,12 +221,20 @@ async function generateAnchorVariations(anchor, targetPageInfo) {
       signal: AbortSignal.timeout(12000),
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 200,
+        max_tokens: 300,
         temperature: 0.3,
         system: "You are an SEO expert. Return ONLY a JSON array of 10 strings, nothing else. No explanation, no backticks.",
         messages: [{
           role: "user",
-          content: `Given this anchor text: "${anchor}" and this target page topic summary: "${targetPageInfo?.summary || targetPageInfo?.title || ''}", generate exactly 10 natural alternative anchor phrases that could realistically link to the same destination page. Range from close synonyms to slightly broader related phrases. Each must sound natural if inserted into a sentence. Return ONLY a JSON array of 10 strings, nothing else.`
+          content: `Given this anchor text: "${originalAnchor}" and this target page topic summary: "${targetPageInfo?.summary || targetPageInfo?.title || ''}", generate exactly 10 natural alternative anchor phrases that could realistically link to the same destination page.
+    
+    Include a mix of:
+    - Close synonyms of the original anchor (2-3 phrases)
+    - Slightly broader related phrases (3-4 phrases)  
+    - Phrases emphasizing a different angle of the same topic (3-4 phrases)
+    
+    Each phrase must read naturally if inserted into a sentence on a blog. 
+    Return ONLY a valid JSON array of 10 strings, nothing else — no markdown, no explanation.`
         }],
       }),
     });
@@ -237,12 +245,12 @@ async function generateAnchorVariations(anchor, targetPageInfo) {
     const arr = JSON.parse(cleanJson);
     if (Array.isArray(arr) && arr.length > 0) {
       console.log(`[VARIATIONS] Generated (${arr.length}): ${arr.slice(0, 5).join(", ")}`);
-      return arr.map(s => String(s).trim()).filter(Boolean);
+      return arr.slice(0, 10).map(s => String(s).trim()).filter(Boolean);
     }
   } catch (err) {
     console.log(`[VARIATIONS] Failed: ${err.message}`);
   }
-  return [anchor];
+  return [];
 }
 
 // ─── Extract topic/type from linkto URL ──────────────────────────────────────
@@ -1047,6 +1055,51 @@ app.post("/api/variations", async (req, res) => {
   }
 });
 
+app.post("/api/generate-anchor-variations", async (req, res) => {
+  const { anchor, linkto } = req.body;
+  if (!anchor || !linkto) return res.status(400).json({ error: "Anchor and destination URL required." });
+  try {
+    const targetPageInfo = await analyzeLinktoPage(linkto);
+    const variations = await generateAnchorVariations(anchor, targetPageInfo);
+    return res.status(200).json({
+      original_anchor: anchor,
+      variations: variations.length > 0 ? variations : [anchor],
+      target_summary: targetPageInfo?.summary || ""
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+async function runAnalysisWithFallback(domain, anchorList, linkto, excludedParagraphs, excludedArticleUrls, isBranded) {
+  const attemptLog = [];
+  for (let i = 0; i < anchorList.length; i++) {
+    const currentAnchor = anchorList[i];
+    try {
+      console.log(`[FALLBACK] Attempting analysis with anchor #${i + 1}/${anchorList.length}: "${currentAnchor}"`);
+      const result = await runAnalysis(domain, currentAnchor, linkto, excludedParagraphs, isBranded, excludedArticleUrls);
+      if (result && result.length > 0) {
+        return {
+          suggestions: result,
+          anchor_used: currentAnchor,
+          was_fallback: i > 0,
+          original_anchor_requested: anchorList[0],
+          anchors_tried_before_success: anchorList.slice(0, i),
+          attempt_log: attemptLog
+        };
+      }
+      attemptLog.push({ anchor: currentAnchor, result: "no_placement_found" });
+    } catch (err) {
+      attemptLog.push({ anchor: currentAnchor, result: "error", message: err.message });
+      console.log(`[FALLBACK] Anchor "${currentAnchor}" failed: ${err.message}. Trying next anchor...`);
+    }
+  }
+  const err = new Error(`No valid placement found across any of the ${anchorList.length} anchor variations tried: ${anchorList.join(", ")}`);
+  err.code = "no_valid_placement_any_anchor";
+  err.anchors_tried = anchorList;
+  throw err;
+}
+
 app.post("/api/analyze", async (req, res) => {
   const rawDomain = req.body.domain || "";
   const domain = rawDomain.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
@@ -1057,13 +1110,21 @@ app.post("/api/analyze", async (req, res) => {
   const validationError = validateInputs(domain, anchor, linkto);
   if (validationError) return res.status(400).json({ error: validationError });
 
-  // Use a secure hash to prevent cache collisions
   const excludeHash = (excludedParagraphs.length > 0 || excludedArticleUrls.length > 0)
     ? crypto.createHash("md5").update([...excludedParagraphs, ...excludedArticleUrls].join("|")).digest("hex").slice(0, 16)
     : "0";
-  const cacheKey = `${domain}::${anchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${excludeHash}::${isBranded}`;
 
-  // Only use cache for fresh requests (no exclusions) — regenerate always runs fresh
+  let anchorList = [];
+  if (Array.isArray(req.body.anchors) && req.body.anchors.length > 0) {
+    anchorList = req.body.anchors.filter(Boolean);
+  } else if (Array.isArray(req.body.selectedAnchors) && req.body.selectedAnchors.length > 0) {
+    anchorList = req.body.selectedAnchors.filter(Boolean);
+  } else {
+    anchorList = [anchor, altAnchor].filter(Boolean);
+  }
+
+  const cacheKey = `${domain}::${anchorList.join("||").toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${excludeHash}::${isBranded}`;
+
   const useCache = excludedParagraphs.length === 0 && excludedArticleUrls.length === 0;
   const cached = useCache ? cache.get(cacheKey) : null;
   if (cached) { console.log(`[CACHE] Hit: ${cacheKey}`); return res.status(200).json({ ...cached, cached: true }); }
@@ -1073,48 +1134,7 @@ app.post("/api/analyze", async (req, res) => {
   }
 
   const attemptAnalysis = async () => {
-    // Determine anchor list to try sequentially
-    let anchorList = [];
-    if (Array.isArray(req.body.selectedAnchors) && req.body.selectedAnchors.length > 0) {
-      anchorList = req.body.selectedAnchors;
-    } else {
-      anchorList = [anchor];
-      if (altAnchor && !anchorList.includes(altAnchor)) anchorList.push(altAnchor);
-    }
-
-    // If only 1-2 anchors and fresh analysis without exclusions, auto-generate top 4 variations as fallback pool
-    if (anchorList.length <= 2 && excludedParagraphs.length === 0 && excludedArticleUrls.length === 0) {
-      try {
-        const targetPageInfo = await analyzeLinktoPage(linkto);
-        const variations = await generateAnchorVariations(anchor, targetPageInfo);
-        for (const v of variations) {
-          if (anchorList.length >= 4) break;
-          if (!anchorList.includes(v)) anchorList.push(v);
-        }
-      } catch (err) {
-        console.log(`[VARIATIONS] Auto-select fallback failed: ${err.message}`);
-      }
-    }
-
-    let lastError = null;
-    for (const currentAnchor of anchorList) {
-      try {
-        console.log(`[FALLBACK] Attempting analysis with anchor: "${currentAnchor}"`);
-        const result = await runAnalysis(domain, currentAnchor, linkto, excludedParagraphs, isBranded, excludedArticleUrls);
-        if (result && result.length > 0) {
-          return {
-            suggestions: result,
-            anchor_used: currentAnchor,
-            was_fallback: currentAnchor !== anchorList[0],
-            original_anchor_requested: anchorList[0]
-          };
-        }
-      } catch (err) {
-        console.log(`[FALLBACK] Anchor "${currentAnchor}" failed: ${err.message}, trying next...`);
-        lastError = err;
-      }
-    }
-    throw lastError || new Error("No valid placement found across any anchor variation");
+    return await runAnalysisWithFallback(domain, anchorList, linkto, excludedParagraphs, excludedArticleUrls, isBranded);
   };
 
   const promise = attemptAnalysis().finally(() => inFlight.delete(cacheKey));
@@ -1126,6 +1146,14 @@ app.post("/api/analyze", async (req, res) => {
     return res.status(200).json(response);
   } catch (err) {
     console.error(`[ERROR] ${err.stack || err.message}`);
+    if (err.code === "no_valid_placement_any_anchor" || err.message?.includes("No valid placement found across any")) {
+      return res.status(404).json({
+        error: "no_valid_placement_any_anchor",
+        message: "None of the provided anchor variations found a suitable placement on this domain.",
+        anchors_tried: err.anchors_tried || anchorList,
+        suggestion: "Try a different domain, or generate a fresh set of anchor variations."
+      });
+    }
     const userFacing = err.message?.includes("No articles") || err.message?.includes("No suitable") || err.message?.includes("All found URLs")
       ? err.message : "Analysis failed. Please try again or use a different domain/anchor.";
     return res.status(500).json({ error: userFacing });
@@ -1135,4 +1163,4 @@ app.post("/api/analyze", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`LinkPlace v3 running on port ${PORT}`));
 
-module.exports = { app, runAnalysis, searchArticles, scrapeAndScore, generateAnchorVariations, analyzeLinktoPage };
+module.exports = { app, runAnalysis, searchArticles, scrapeAndScore, generateAnchorVariations, analyzeLinktoPage, runAnalysisWithFallback };
