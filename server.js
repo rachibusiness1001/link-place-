@@ -625,7 +625,7 @@ function mentionstool(text) {
   const matchCount = toolPatterns.filter((re) => re.test(text)).length;
   // ✅ FIX: if 2+ patterns match, this paragraph is almost certainly a 
   // dedicated tool-spotlight, not a passing mention — reject with higher confidence
-  return matchCount >= 1;
+  return matchCount >= 2;
 }
 
 async function scrapeAndScore(url, anchor, keywords, isBranded = false, isToolTarget = false) {
