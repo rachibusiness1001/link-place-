@@ -674,9 +674,19 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
     if (!urls.length) throw new Error("No articles found. Try a different domain or anchor text.");
 
     let linktoDomain = "";
-    try { linktoDomain = new URL(linkto).hostname.replace(/^www\./, ""); } catch {}
-    filteredUrls = urls.filter((url) => !url.includes(linktoDomain));
-    if (!filteredUrls.length) throw new Error("All found URLs belong to the linkto domain.");
+    let cleanDomain = domain.replace(/^www\./, "").split("/")[0].toLowerCase();
+    try { linktoDomain = new URL(linkto).hostname.replace(/^www\./, "").toLowerCase(); } catch {}
+    
+    // Allow INTERNAL LINKING when domain matches destination hostname
+    if (cleanDomain === linktoDomain || linktoDomain.includes(cleanDomain) || cleanDomain.includes(linktoDomain)) {
+      filteredUrls = urls.filter((url) => {
+        try { return new URL(url).pathname !== new URL(linkto).pathname; } catch { return url !== linkto; }
+      });
+      if (!filteredUrls.length) throw new Error("No other articles found on this domain to place an internal link.");
+    } else {
+      filteredUrls = urls.filter((url) => !url.includes(linktoDomain));
+      if (!filteredUrls.length) throw new Error("All found URLs belong to the destination domain.");
+    }
 
     console.log(`[SEARCH] Using ${filteredUrls.length} articles: ${filteredUrls.join(", ")}`);
 
