@@ -777,9 +777,9 @@ function startLoading() {
   const card = document.getElementById('loading-card');
   card.classList.add('show');
   const bar = document.getElementById('progress-bar');
-  bar.style.width = '0%';
+  if (bar) bar.style.width = '0%';
 
-  document.querySelectorAll('#steps-list li').forEach(li => {
+  document.querySelectorAll('.loading-steps li').forEach(li => {
     li.className = '';
   });
   currentStep = 1;
@@ -788,7 +788,7 @@ function startLoading() {
   let p = 0;
   stepTimer = setInterval(() => {
     p += 2;
-    if (p <= 90) bar.style.width = p + '%';
+    if (bar && p <= 90) bar.style.width = p + '%';
     if (p === 20) { updateStep(1, 'done'); updateStep(2, 'active'); }
     if (p === 45) { updateStep(2, 'done'); updateStep(3, 'active'); }
     if (p === 70) { updateStep(3, 'done'); updateStep(4, 'active'); }
@@ -803,7 +803,8 @@ function updateStep(num, state) {
 
 function stopLoading() {
   clearInterval(stepTimer);
-  document.getElementById('progress-bar').style.width = '100%';
+  const bar = document.getElementById('progress-bar');
+  if (bar) bar.style.width = '100%';
   for (let i = 1; i <= 5; i++) updateStep(i, 'done');
   setTimeout(() => {
     document.getElementById('loading-card').classList.remove('show');

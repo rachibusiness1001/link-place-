@@ -510,7 +510,9 @@ function rerankWithContext(allParagraphsByUrl, anchor, keywords) {
   for (const [url, paragraphs] of Object.entries(allParagraphsByUrl)) {
     for (let i = 0; i < paragraphs.length; i++) {
       const p = paragraphs[i];
-      const neighbors = [paragraphs[i - 1], paragraphs[i + 1]].filter(Boolean);
+      const prevP = paragraphs[i - 1];
+      const nextP = paragraphs[i + 1];
+      const neighbors = [prevP, nextP].filter(Boolean);
       let contextBonus = 0;
       let neighborRelates = false;
       for (const n of neighbors) {
@@ -518,8 +520,16 @@ function rerankWithContext(allParagraphsByUrl, anchor, keywords) {
         const kwHits = keywords.filter((k) => k.length > 4 && n.text.toLowerCase().includes(k)).length;
         if (kwHits >= 1) neighborRelates = true;
       }
-      if (neighborRelates) contextBonus += 10; // STAGE B: +10 Neighboring paragraphs also relate
-      result.push({ ...p, score: p.score + contextBonus, url });
+      if (neighborRelates) contextBonus += 10;
+      
+      const enrichedP = { 
+        ...p, 
+        score: p.score + contextBonus, 
+        url,
+        prevText: prevP ? prevP.text : null,
+        nextText: nextP ? nextP.text : null 
+      };
+      result.push(enrichedP);
     }
   }
   return result;
@@ -602,21 +612,18 @@ ALWAYS pick from the highest tier that has candidate paragraphs available in the
 ONLY return failure if literally nothing touches the target URL's broad subject area at all (e.g., a cooking recipe for an AI software target).
 
 ═══════════════════════════════════════
-STAGE D — PLACEMENT & EDITING RULES
+STAGE D — PLACEMENT & EDITING RULES (CRITICAL)
 ═══════════════════════════════════════
 1. NATURAL FIT FIRST: if anchor phrase already fits an existing sentence without changing meaning, use minimal edit.
-2. CREATIVE EDIT (default for Tier 2/3, allowed for Tier 1 too):
-   a) Add ONE bridging sentence that connects the paragraph's subject to the target URL's topic. Must read naturally within flow.
-   b) Do NOT change original meaning — only add/extend, never contradict or distort existing content.
-   c) For Tier 2/3, use softer framing language ("for those who want to explore this further," "a related resource," "if you're looking to build this skill") rather than claiming the paragraph was already about the target topic.
-   d) VALIDATION CHECK — before finalizing any creative edit bridge, verify:
-      - The bridging sentence must NOT introduce any concept, entity, or claim that isn't already implied by the paragraph itself. Do not invent new scenarios (e.g., 'agile teams,' 'remote talent') that have no basis in the paragraph's actual content.
-      - The bridging sentence must NOT contradict or work against the article's own argument or title. If the article's core argument is 'you don't need X,' never insert a sentence implying 'X is now more accessible' as if it supports the same point — that is a logical contradiction, not a bridge.
-      - If you cannot write a bridge that passes both checks above, REJECT this paragraph entirely and move to the next candidate. Do not soften or water down a bad bridge — discard it.
-   e) SPECIFICITY CHECK — a bridging sentence must reference something SPECIFIC from the paragraph (a named concept, process, or challenge mentioned in that paragraph), not just the general topic of 'AI.' A bridge like 'benefits professionals seeking to master AI technologies' is too generic and should be rejected — it could apply to any AI-related paragraph on any site. Instead, the bridge must name the specific thing the paragraph discusses (e.g., a specific technique, challenge, or process) and explain concretely how the target URL relates to THAT specific thing.
-3. ABSOLUTE NON-IRRELEVANCE RULE: Do not place a link where the paragraph's broad subject domain has NO reasonable relation at all to the target URL (e.g., team lunch traditions linking to Python course).
-4. JUSTIFICATION FIELD (always required in "reason"): One sentence explaining the connection — for Tier 1 direct, for Tier 2/3 say honestly "adjacent topic, bridged via [reason]".
-5. Prefer suggestions from DIFFERENT articles when at least two articles have genuinely strong (Tier 1 or Tier 2) candidate paragraphs. However, relevance ALWAYS takes priority over diversity: if only ONE article has a Tier 1/2 quality match and no other article rises above Tier 3, it is completely acceptable to return 2 different paragraphs from that SAME article. Never sacrifice relevance quality or bridge validity (see rule 2d) just to satisfy article diversity. Only return fewer than 2 suggestions if genuinely nothing across all paragraphs meets even Tier 3 relevance.${brandedRule}
+2. MINIMAL EDIT GUARDRAIL: Do NOT rewrite the entire paragraph. You may only modify a maximum of 5 to 7 words, or append a single short bridging sentence. The original author's voice, tone, and intent must remain 100% intact.
+3. CONTEXT-AWARE FLOW: You have been provided with "Previous context" and "Next context". Your edit MUST flow logically from the previous sentence and into the next sentence. If your edit breaks the narrative connection between paragraphs, REJECT the candidate entirely.
+4. VALIDATION CHECK:
+   a) The bridging sentence must NOT introduce any concept, entity, or claim that isn't already implied by the paragraph itself. Do not invent new scenarios (e.g., 'agile teams,' 'remote talent') that have no basis in the paragraph's actual content.
+   b) The bridging sentence must NOT contradict or work against the article's own argument or title.
+   c) If you cannot write a bridge that passes these checks and the minimal edit rule, REJECT this paragraph entirely and move to the next candidate. Do not soften or water down a bad bridge — discard it.
+5. ABSOLUTE NON-IRRELEVANCE RULE: Do not place a link where the paragraph's broad subject domain has NO reasonable relation at all to the target URL (e.g., team lunch traditions linking to Python course).
+6. JUSTIFICATION FIELD (always required in "reason"): One sentence explaining the connection — for Tier 1 direct, for Tier 2/3 say honestly "adjacent topic, bridged via [reason]".
+7. Prefer suggestions from DIFFERENT articles when at least two articles have genuinely strong (Tier 1 or Tier 2) candidate paragraphs. However, relevance ALWAYS takes priority over diversity: if only ONE article has a Tier 1/2 quality match and no other article rises above Tier 3, it is completely acceptable to return 2 different paragraphs from that SAME article. Never sacrifice relevance quality or bridge validity just to satisfy article diversity.${brandedRule}
 
 Paragraphs:
 ${paragraphText}
