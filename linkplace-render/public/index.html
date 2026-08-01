@@ -1092,6 +1092,7 @@ async function runAnalysis(isRegenerate = false, brandedFlag = false, customAnch
     }
     
     document.getElementById('error-box' + suffix).innerHTML = errMsg;
+    document.getElementById('error-box' + suffix).classList.add('show');
   }
 
   btn.disabled = false;
