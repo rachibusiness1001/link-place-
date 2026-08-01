@@ -1053,41 +1053,41 @@ async function runAnalysis(isRegenerate = false, brandedFlag = false, customAnch
     document.getElementById('loading-card').classList.remove('show');
     let errMsg = err.message || 'Something went wrong. Please try again.';
     if (err.domain_content_summary && err.target_url_topic) {
-      const copyText = \`⚠️ No suitable placement found\n\nThis domain's content: \${err.domain_content_summary}\nTarget URL is about: \${err.target_url_topic}\nLikely reason: \${err.likely_reason === 'topic_mismatch' ? 'Topic mismatch between domain content and target URL' : err.likely_reason}\n\n💡 Suggestion: \${err.suggestion}\`;
-      const copyFn = \`navigator.clipboard.writeText(decodeURIComponent('\${encodeURIComponent(copyText)}')).then(() => { const b = document.getElementById('copy-diag-btn\${suffix}'); b.innerText='Copied!'; setTimeout(()=>b.innerText='📋 Copy explanation for client', 2000); })\`;
+      const copyText = `⚠️ No suitable placement found\n\nThis domain's content: ${err.domain_content_summary}\nTarget URL is about: ${err.target_url_topic}\nLikely reason: ${err.likely_reason === 'topic_mismatch' ? 'Topic mismatch between domain content and target URL' : err.likely_reason}\n\n💡 Suggestion: ${err.suggestion}`;
+      const copyFn = `navigator.clipboard.writeText(decodeURIComponent('${encodeURIComponent(copyText)}')).then(() => { const b = document.getElementById('copy-diag-btn${suffix}'); b.innerText='Copied!'; setTimeout(()=>b.innerText='📋 Copy explanation for client', 2000); })`;
       
-      errMsg = \`<div style="margin-bottom:12px;">
+      errMsg = `<div style="margin-bottom:12px;">
         <b style="color:var(--text1); font-size:14px;">⚠️ No suitable placement found</b>
       </div>
       <div style="margin-bottom:8px; line-height: 1.5;">
-        <span style="color:var(--text2);"><b>This domain's content:</b></span> \${escapeHtml(err.domain_content_summary)}
+        <span style="color:var(--text2);"><b>This domain's content:</b></span> ${escapeHtml(err.domain_content_summary)}
       </div>
       <div style="margin-bottom:8px; line-height: 1.5;">
-        <span style="color:var(--text2);"><b>Target URL is about:</b></span> \${escapeHtml(err.target_url_topic)}
+        <span style="color:var(--text2);"><b>Target URL is about:</b></span> ${escapeHtml(err.target_url_topic)}
       </div>
       <div style="margin-bottom:12px; line-height: 1.5;">
-        <span style="color:var(--text2);"><b>Likely reason:</b></span> \${err.likely_reason === 'topic_mismatch' ? 'Topic mismatch between domain content and target URL' : escapeHtml(err.likely_reason)}
+        <span style="color:var(--text2);"><b>Likely reason:</b></span> ${err.likely_reason === 'topic_mismatch' ? 'Topic mismatch between domain content and target URL' : escapeHtml(err.likely_reason)}
       </div>
       <div style="margin-bottom:16px; padding: 10px; background: rgba(255, 255, 255, 0.05); border-radius: var(--radius-sm); border: 1px solid var(--border);">
-        <b style="color:var(--text1);">💡 Suggestion:</b> \${escapeHtml(err.suggestion || '')}
-      </div>\`;
+        <b style="color:var(--text1);">💡 Suggestion:</b> ${escapeHtml(err.suggestion || '')}
+      </div>`;
       
       if (err.anchors_tried && Array.isArray(err.anchors_tried)) {
-        errMsg += \`<div style="margin-bottom: 16px;"><b style="color:var(--text2);">Tried Anchors (\${err.anchors_tried.length}):</b> <span style="color:var(--text3);">\${err.anchors_tried.map(a => \`'\${escapeHtml(a)}'\`).join(', ')}</span></div>\`;
+        errMsg += `<div style="margin-bottom: 16px;"><b style="color:var(--text2);">Tried Anchors (${err.anchors_tried.length}):</b> <span style="color:var(--text3);">${err.anchors_tried.map(a => `'${escapeHtml(a)}'`).join(', ')}</span></div>`;
       }
       
-      errMsg += \`<div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <button type="button" class="btn-regenerate" style="margin-top:0; width:auto; padding:8px 16px;" onclick="analyze(\${brandedFlag})">✨ Select & Try Other Anchor Variations</button>
-        <button type="button" class="btn-regenerate" id="copy-diag-btn\${suffix}" style="margin-top:0; width:auto; padding:8px 16px; background: var(--surface2); border: 1px solid var(--border); color: var(--text);" onclick="\${copyFn}">📋 Copy explanation for client</button>
-      </div>\`;
+      errMsg += `<div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button type="button" class="btn-regenerate" style="margin-top:0; width:auto; padding:8px 16px;" onclick="analyze(${brandedFlag})">✨ Select & Try Other Anchor Variations</button>
+        <button type="button" class="btn-regenerate" id="copy-diag-btn${suffix}" style="margin-top:0; width:auto; padding:8px 16px; background: var(--surface2); border: 1px solid var(--border); color: var(--text);" onclick="${copyFn}">📋 Copy explanation for client</button>
+      </div>`;
     } else {
       errMsg = 'Error: ' + errMsg;
       if (err.suggestion) {
-        errMsg += \`<br><br><b style="color:var(--text1);">💡 Suggestion:</b> \${escapeHtml(err.suggestion)}\`;
-        errMsg += \`<br><br><button type="button" class="btn-regenerate" style="margin-top:8px; width:auto; padding:6px 14px;" onclick="analyze(\${brandedFlag})">✨ Select & Try Other Anchor Variations</button>\`;
+        errMsg += `<br><br><b style="color:var(--text1);">💡 Suggestion:</b> ${escapeHtml(err.suggestion)}`;
+        errMsg += `<br><br><button type="button" class="btn-regenerate" style="margin-top:8px; width:auto; padding:6px 14px;" onclick="analyze(${brandedFlag})">✨ Select & Try Other Anchor Variations</button>`;
       }
       if (err.anchors_tried && Array.isArray(err.anchors_tried)) {
-        errMsg += \`<br><br><b style="color:var(--text2);">Tried Anchors (\${err.anchors_tried.length}):</b> <span style="color:var(--text3);">\${err.anchors_tried.map(a => \`'\${escapeHtml(a)}'\`).join(', ')}</span>\`;
+        errMsg += `<br><br><b style="color:var(--text2);">Tried Anchors (${err.anchors_tried.length}):</b> <span style="color:var(--text3);">${err.anchors_tried.map(a => `'${escapeHtml(a)}'`).join(', ')}</span>`;
       }
     }
     
