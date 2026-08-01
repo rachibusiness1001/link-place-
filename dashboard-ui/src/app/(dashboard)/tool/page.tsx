@@ -24,7 +24,7 @@ export default function ToolPage() {
   const [altAnchor, setAltAnchor] = useState('');
   
   const [results, setResults] = useState<any[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<any>(null);
 
   // Project management
   const { projects, addProject, savePlacement } = useAppStore();
@@ -82,12 +82,12 @@ export default function ToolPage() {
       const data = await res.json();
       
       if (!res.ok) {
-        throw new Error(data.error || "Failed to analyze. Please try again.");
+        throw data;
       }
       
       setResults(data.suggestions || []);
     } catch (err: any) {
-      setError(err.message);
+      setError(err);
     } finally {
       clearInterval(stepInterval);
       setLoadingStep(LOADING_STEPS.length);
@@ -310,10 +310,74 @@ export default function ToolPage() {
                 </div>
               </div>
 
-              {error && (
+              {error && typeof error === 'string' && (
                 <div className="flex items-center gap-3 p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
                   <AlertCircle className="w-5 h-5 shrink-0" />
                   <p>{error}</p>
+                </div>
+              )}
+              {error && typeof error === 'object' && error.message && !error.domain_content_summary && (
+                <div className="flex flex-col gap-3 p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                  <div className="flex items-center gap-3">
+                    <AlertCircle className="w-5 h-5 shrink-0" />
+                    <p>{error.message}</p>
+                  </div>
+                  {error.suggestion && (
+                    <div className="pl-8 pt-2">
+                      <b className="text-white">💡 Suggestion:</b> {error.suggestion}
+                      <button type="button" onClick={handleSearch} className="mt-3 block px-4 py-2 bg-white/5 border border-white/10 rounded text-white text-xs hover:bg-white/10 transition-colors">
+                        ✨ Select & Try Other Anchor Variations
+                      </button>
+                    </div>
+                  )}
+                  {error.anchors_tried && (
+                    <div className="pl-8 pt-2 text-white/50 text-xs">
+                      Tried Anchors ({error.anchors_tried.length}): {error.anchors_tried.map((a: string) => \`'\${a}'\`).join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
+              {error && typeof error === 'object' && error.domain_content_summary && (
+                <div className="flex flex-col gap-3 p-5 rounded-lg bg-[#111111] border border-red-500/30 text-sm">
+                  <div className="font-semibold text-red-400 text-base mb-2">
+                    ⚠️ No suitable placement found
+                  </div>
+                  <div className="text-white/80 leading-relaxed">
+                    <span className="text-white/50 font-semibold">This domain's content:</span> {error.domain_content_summary}
+                  </div>
+                  <div className="text-white/80 leading-relaxed">
+                    <span className="text-white/50 font-semibold">Target URL is about:</span> {error.target_url_topic}
+                  </div>
+                  <div className="text-white/80 leading-relaxed mb-2">
+                    <span className="text-white/50 font-semibold">Likely reason:</span> {error.likely_reason === 'topic_mismatch' ? 'Topic mismatch between domain content and target URL' : error.likely_reason}
+                  </div>
+                  <div className="bg-white/5 border border-white/10 rounded-md p-3 mb-2">
+                    <b className="text-white">💡 Suggestion:</b> <span className="text-white/90">{error.suggestion}</span>
+                  </div>
+                  {error.anchors_tried && (
+                    <div className="text-white/50 text-xs mb-3">
+                      Tried Anchors ({error.anchors_tried.length}): {error.anchors_tried.map((a: string) => \`'\${a}'\`).join(', ')}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-3 mt-1">
+                    <button type="button" onClick={handleSearch} className="px-4 py-2 bg-[#7c6dfa] hover:bg-[#6855fa] text-white rounded-md text-sm transition-colors font-medium">
+                      ✨ Select & Try Other Anchor Variations
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={(e) => {
+                        const btn = e.currentTarget;
+                        const copyText = \`⚠️ No suitable placement found\n\nThis domain's content: \${error.domain_content_summary}\nTarget URL is about: \${error.target_url_topic}\nLikely reason: \${error.likely_reason === 'topic_mismatch' ? 'Topic mismatch between domain content and target URL' : error.likely_reason}\n\n💡 Suggestion: \${error.suggestion}\`;
+                        navigator.clipboard.writeText(copyText).then(() => {
+                          btn.innerText = 'Copied!';
+                          setTimeout(() => { btn.innerText = '📋 Copy explanation for client'; }, 2000);
+                        });
+                      }}
+                      className="px-4 py-2 bg-[#1a1a1a] border border-white/10 hover:bg-[#222222] text-white rounded-md text-sm transition-colors font-medium"
+                    >
+                      📋 Copy explanation for client
+                    </button>
+                  </div>
                 </div>
               )}
 

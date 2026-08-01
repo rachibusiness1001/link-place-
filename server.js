@@ -1071,6 +1071,54 @@ app.post("/api/generate-anchor-variations", async (req, res) => {
   }
 });
 
+async function generateMismatchDiagnosis(domain, anchorList, targetPageInfo, sampleDomainParagraphs) {
+  const prompt = `You are analyzing why a link placement search failed.
+  
+  Domain being searched: ${domain}
+  Anchor variations tried (all failed): ${anchorList.join(", ")}
+  Target URL topic: ${targetPageInfo?.summary || targetPageInfo?.title || "Unknown"}
+  
+  Sample content actually found on this domain (a few paragraph excerpts):
+  ${sampleDomainParagraphs.slice(0, 5).map(p => p.text.slice(0, 150)).join("\n---\n")}
+  
+  Based on this, provide a JSON response:
+  {
+    "domain_content_summary": "1-2 sentence summary of what this domain's content actually focuses on, based on the sample paragraphs",
+    "target_url_topic": "1 sentence summary of what the target URL is about",
+    "likely_reason": "topic_mismatch",
+    "suggestion": "1-2 sentence actionable suggestion — e.g. recommend a different domain category, or a different anchor angle that might fit this domain's actual content"
+  }
+  
+  Return ONLY valid JSON, no markdown, no explanation outside the JSON.`;
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "claude-3-haiku-20240307",
+        max_tokens: 300,
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+    const data = await response.json();
+    let text = data.content[0].text;
+    text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    return JSON.parse(text);
+  } catch (err) {
+    return {
+      domain_content_summary: "Could not generate summary.",
+      target_url_topic: "Could not analyze target.",
+      likely_reason: "topic_mismatch",
+      suggestion: "Try a different domain or anchor text."
+    };
+  }
+}
+
 async function runAnalysisWithFallback(domain, anchorList, linkto, excludedParagraphs, excludedArticleUrls, isBranded) {
   const attemptLog = [];
   for (let i = 0; i < anchorList.length; i++) {
@@ -1094,9 +1142,30 @@ async function runAnalysisWithFallback(domain, anchorList, linkto, excludedParag
       console.log(`[FALLBACK] Anchor "${currentAnchor}" failed: ${err.message}. Trying next anchor...`);
     }
   }
-  const err = new Error(`No valid placement found across any of the ${anchorList.length} anchor variations tried: ${anchorList.join(", ")}`);
+
+  // All anchors failed, try to generate a diagnosis
+  let diagnosis = null;
+  try {
+    const lastAnchor = anchorList[anchorList.length - 1];
+    const poolKey = `pool::${domain}::${lastAnchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${isBranded}::${excludedArticleUrls.length}`;
+    const cachedPool = paragraphPoolCache.get(poolKey);
+    
+    if (cachedPool && cachedPool.topParagraphs && cachedPool.topParagraphs.length > 0) {
+      diagnosis = await generateMismatchDiagnosis(domain, anchorList, cachedPool.linktoInfo, cachedPool.topParagraphs.slice(0, 5));
+    }
+  } catch (e) {
+    console.log("[FALLBACK] Failed to generate diagnosis: " + e.message);
+  }
+
+  const err = new Error(`None of the ${anchorList.length} anchor variations found a suitable placement on this domain.`);
   err.code = "no_valid_placement_any_anchor";
   err.anchors_tried = anchorList;
+  if (diagnosis) {
+    err.domain_content_summary = diagnosis.domain_content_summary;
+    err.target_url_topic = diagnosis.target_url_topic;
+    err.likely_reason = diagnosis.likely_reason;
+    err.suggestion = diagnosis.suggestion;
+  }
   throw err;
 }
 
@@ -1151,7 +1220,10 @@ app.post("/api/analyze", async (req, res) => {
         error: "no_valid_placement_any_anchor",
         message: "None of the provided anchor variations found a suitable placement on this domain.",
         anchors_tried: err.anchors_tried || anchorList,
-        suggestion: "Try a different domain, or generate a fresh set of anchor variations."
+        suggestion: err.suggestion || "Try a different domain, or generate a fresh set of anchor variations.",
+        domain_content_summary: err.domain_content_summary,
+        target_url_topic: err.target_url_topic,
+        likely_reason: err.likely_reason
       });
     }
     const userFacing = err.message?.includes("No articles") || err.message?.includes("No suitable") || err.message?.includes("All found URLs")
