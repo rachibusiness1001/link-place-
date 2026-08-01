@@ -881,6 +881,9 @@ async function callAPI(domain, anchor, altAnchor, linkto, excludedParagraphs, is
     errorObj.code = result.error;
     errorObj.suggestion = result.suggestion;
     errorObj.anchors_tried = result.anchors_tried;
+    errorObj.domain_content_summary = result.domain_content_summary;
+    errorObj.target_url_topic = result.target_url_topic;
+    errorObj.likely_reason = result.likely_reason;
     throw errorObj;
   }
   return result;
