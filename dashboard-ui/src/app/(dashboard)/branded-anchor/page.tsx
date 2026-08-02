@@ -26,10 +26,7 @@ export default function BrandedAnchorPage() {
   const [results, setResults] = useState<any[] | null>(null);
   const [error, setError] = useState<any>(null);
 
-  const [showVariationsModal, setShowVariationsModal] = useState(false);
-  const [isGeneratingVariations, setIsGeneratingVariations] = useState(false);
-  const [variations, setVariations] = useState<string[]>([]);
-  const [selectedVariations, setSelectedVariations] = useState<Set<string>>(new Set());
+
 
   // Project management
   const { projects, addProject, savePlacement } = useAppStore();
@@ -61,35 +58,11 @@ export default function BrandedAnchorPage() {
     setSavedIds((prev) => new Set(prev).add(idx));
   };
 
-  const handleInitialClick = async () => {
+  const handleSearch = async () => {
     if (!domain || !anchor || !linkto) {
       setError("Please fill in Target Domain, Branded Anchor, and Destination URL");
       return;
     }
-    setError(null);
-    setShowVariationsModal(true);
-    setIsGeneratingVariations(true);
-    setVariations([]);
-    try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://link-place-latest.onrender.com";
-      const res = await fetch(`${backendUrl}/api/generate-anchor-variations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ anchor })
-      });
-      const data = await res.json();
-      const vars = (data.variations || []).filter((v: string) => v.toLowerCase() !== anchor.toLowerCase()).slice(0, 5);
-      setVariations(vars);
-      setSelectedVariations(new Set(vars));
-    } catch (err: any) {
-      // If variations fail, just continue with empty
-    } finally {
-      setIsGeneratingVariations(false);
-    }
-  };
-
-  const handleSearch = async () => {
-    setShowVariationsModal(false);
 
     setIsSearching(true);
     setError(null);
@@ -100,8 +73,8 @@ export default function BrandedAnchorPage() {
       setLoadingStep((prev) => Math.min(prev + 1, LOADING_STEPS.length - 1));
     }, 2000);
 
-    const anchorsToTry = [anchor, ...Array.from(selectedVariations)];
-    if (anchorsToTry.length === 1 && altAnchor) {
+    const anchorsToTry = [anchor];
+    if (altAnchor) {
       anchorsToTry.push(altAnchor);
     }
 
@@ -538,7 +511,7 @@ export default function BrandedAnchorPage() {
 
               <div className="pt-2">
                 <button
-                  onClick={handleInitialClick}
+                  onClick={handleSearch}
                   disabled={isSearching}
                   className="w-full py-3 rounded-lg bg-zinc-100 hover:bg-white text-black font-semibold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
                 >
@@ -551,71 +524,7 @@ export default function BrandedAnchorPage() {
         </AnimatePresence>
       </motion.div>
 
-      {/* Variations Modal */}
-      <AnimatePresence>
-        {showVariationsModal && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-[#121212] border border-white/10 p-6 rounded-xl max-w-md w-full shadow-2xl"
-            >
-              <h3 className="text-xl font-semibold text-white mb-2">Anchor Variations</h3>
-              <p className="text-sm text-zinc-400 mb-6">
-                We generated natural variations for <span className="font-semibold text-white">"{anchor}"</span>. 
-                The AI will try these sequentially if the primary anchor doesn't fit.
-              </p>
-              
-              {isGeneratingVariations ? (
-                <div className="py-8 flex flex-col items-center justify-center gap-3">
-                  <div className="w-6 h-6 border-2 border-[#7c6dfa] border-t-transparent rounded-full animate-spin"></div>
-                  <span className="text-sm text-zinc-400">Generating contextual variations...</span>
-                </div>
-              ) : variations.length > 0 ? (
-                <div className="space-y-3 mb-6 max-h-[300px] overflow-y-auto pr-2" style={{ scrollbarWidth: 'thin', scrollbarColor: '#333 transparent' }}>
-                  {variations.map((v) => (
-                    <label key={v} className="flex items-center gap-3 p-3 rounded-lg border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] cursor-pointer transition-colors">
-                      <input 
-                        type="checkbox" 
-                        className="w-4 h-4 rounded border-white/10 bg-black text-[#7c6dfa] focus:ring-[#7c6dfa] focus:ring-offset-black"
-                        checked={selectedVariations.has(v)}
-                        onChange={(e) => {
-                          const next = new Set(selectedVariations);
-                          if (e.target.checked) next.add(v);
-                          else next.delete(v);
-                          setSelectedVariations(next);
-                        }}
-                      />
-                      <span className="text-sm text-zinc-200">{v}</span>
-                    </label>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-sm text-zinc-500 italic mb-6">No additional variations could be generated.</div>
-              )}
-              
-              <div className="flex justify-end gap-3 pt-4 border-t border-white/5">
-                <button 
-                  type="button"
-                  onClick={() => setShowVariationsModal(false)}
-                  className="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-white transition-colors"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="button"
-                  disabled={isGeneratingVariations}
-                  onClick={handleSearch}
-                  className="px-5 py-2 text-sm font-medium bg-[#7c6dfa] text-white rounded-lg hover:bg-[#6855fa] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-                >
-                  Done
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+
     </motion.div>
   );
 }
