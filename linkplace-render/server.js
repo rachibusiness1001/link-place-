@@ -430,6 +430,9 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
 
 function extractArticleContent(html, url) {
   try {
+    console.log(`[EXTRACT-DEBUG] HTML length for ${url}: ${html.length} chars`);
+    console.log(`[EXTRACT-DEBUG] First 300 chars: ${html.slice(0, 300).replace(/\n/g, ' ')}`);
+
     const dom = new JSDOM(html, { url });
     const doc = dom.window.document;
     // Remove comment, reply, TOC, sidebar, index, and navigation sections before extraction
@@ -450,7 +453,12 @@ function extractArticleContent(html, url) {
     });
     const reader = new Readability(doc);
     const article = reader.parse();
-    if (!article || !article.content || article.textContent.length < 200) return null;
+    if (!article || !article.content || article.textContent.length < 200) {
+      // ✅ DIAGNOSTIC: log exactly why extraction failed
+      console.log(`[EXTRACT-DEBUG] FAILED for ${url}: article=${!!article}, hasContent=${!!article?.content}, textLength=${article?.textContent?.length || 0}`);
+      console.log(`[EXTRACT-DEBUG] Page title tag: ${dom.window.document.title}`);
+      return null;
+    }
     console.log(`[EXTRACT] ${article.textContent.length} chars, title: "${article.title?.slice(0, 60)}"`);
     return article;
   } catch (err) {
@@ -790,6 +798,7 @@ async function scrapeAndScore(url, anchor, keywords, isBranded = false, isToolTa
   console.log(`[SCRAPE] Fetching ${url}`);
   try {
     const { html, status } = await fetchWithRetry(url, 2, 30000);
+    console.log(`[SCRAPE-DEBUG] ${url} → HTTP ${status}, HTML length: ${html?.length || 0} chars`);
     if (isBlockedPage(html, status)) { console.log(`[SCRAPE] ${url} is blocked or captcha`); return "BLOCKED"; }
     const article = extractArticleContent(html, url);
     if (!article) { console.log(`[SCRAPE] No readable content at ${url}`); return []; }
