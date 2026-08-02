@@ -267,7 +267,7 @@ Return ONLY a valid JSON array of exactly 5 strings, nothing else — no markdow
 async function analyzeLinktoPage(linkto) {
   console.log(`[LINKTO] Analyzing destination URL: ${linkto}`);
   try {
-    const { html, status } = await fetchWithRetry(linkto, 1, 10000);
+    const { html, status } = await fetchWithRetry(linkto, 1, 20000);
     if (isBlockedPage(html, status)) {
       console.log(`[LINKTO] Blocked, using URL slug only`);
       return extractLinktoFromSlug(linkto);
@@ -326,7 +326,7 @@ const DEFAULT_HEADERS = {
   Connection: "keep-alive",
 };
 
-async function fetchWithRetry(url, maxAttempts = 2, timeoutMs = 18000) {
+async function fetchWithRetry(url, maxAttempts = 2, timeoutMs = 30000) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -362,62 +362,70 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
   ];
 
   const allUrls = new Set();
-  const queryTelemetry = []; // NEW: track what actually happened per query
+  const queryTelemetry = [];
 
-  for (const query of queries) {
-    console.log(`[SEARCH] Query: ${query}`);
-    try {
+  // ✅ PERF FIX: Run ALL queries in PARALLEL (was sequential — caused 2-3 min waits)
+  // Timeout reduced from 18s to 8s. All 4 queries now fire simultaneously.
+  const queryResults = await Promise.allSettled(
+    queries.map(async (query) => {
+      console.log(`[SEARCH] Query: ${query}`);
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 18000);
-      const res = await fetch(
-        `https://serpapi.com/search?${new URLSearchParams({ q: query, api_key: process.env.SERPAPI_KEY, engine: "google", num: "10" })}`,
-        { signal: controller.signal }
-      );
-      clearTimeout(timer);
+      const timer = setTimeout(() => controller.abort(), 8000);
+      try {
+        const res = await fetch(
+          `https://serpapi.com/search?${new URLSearchParams({ q: query, api_key: process.env.SERPAPI_KEY, engine: "google", num: "10" })}`,
+          { signal: controller.signal }
+        );
+        clearTimeout(timer);
 
-      if (!res.ok) {
-        console.log(`[SEARCH] SerpAPI HTTP ${res.status}`);
-        queryTelemetry.push({ query, error: `HTTP ${res.status}`, resultCount: 0 });
-        continue;
-      }
-
-      const data = await res.json();
-
-      // Distinguish genuine zero-results (normal) from real API errors (quota/key/etc.)
-      if (data.error) {
-        const isZeroResults = /hasn't returned any results|no results found/i.test(data.error);
-        if (isZeroResults) {
-          console.log(`[SEARCH] Zero results (normal, not an error): ${query}`);
-          queryTelemetry.push({ query, rawResultCount: 0, isZeroResults: true });
-        } else {
-          console.log(`[SEARCH] SerpAPI ERROR: ${data.error}`);
-          queryTelemetry.push({ query, error: data.error, resultCount: 0, isZeroResults: false });
+        if (!res.ok) {
+          console.log(`[SEARCH] SerpAPI HTTP ${res.status} for: ${query}`);
+          return { query, error: `HTTP ${res.status}`, resultCount: 0 };
         }
-        continue;
-      }
 
-      const rawResults = data?.organic_results || [];
-      const resultCount = rawResults.length;
-      let validUrlCount = 0;
-      for (const r of rawResults) {
-        if (r.link && r.link.includes(domain) && isArticleUrl(r.link)) {
-          allUrls.add(r.link);
-          validUrlCount++;
+        const data = await res.json();
+
+        if (data.error) {
+          const isZeroResults = /hasn't returned any results|no results found/i.test(data.error);
+          if (isZeroResults) {
+            console.log(`[SEARCH] Zero results (normal): ${query}`);
+            return { query, rawResultCount: 0, isZeroResults: true };
+          } else {
+            console.log(`[SEARCH] SerpAPI ERROR: ${data.error}`);
+            return { query, error: data.error, resultCount: 0, isZeroResults: false };
+          }
         }
-      }
-      console.log(`[SEARCH] Query returned ${resultCount} raw results, ${validUrlCount} passed isArticleUrl filter`);
-      queryTelemetry.push({ query, rawResultCount: resultCount, validUrlCount });
 
-    } catch (err) {
-      console.log(`[SEARCH] Query failed: ${err.message}`);
-      queryTelemetry.push({ query, error: err.message, resultCount: 0 });
+        const rawResults = data?.organic_results || [];
+        const resultCount = rawResults.length;
+        const validUrls = rawResults
+          .filter(r => r.link && r.link.includes(domain) && isArticleUrl(r.link))
+          .map(r => r.link);
+
+        console.log(`[SEARCH] "${query}" → ${resultCount} raw, ${validUrls.length} passed filter`);
+        return { query, rawResultCount: resultCount, validUrlCount: validUrls.length, validUrls };
+
+      } catch (err) {
+        clearTimeout(timer);
+        console.log(`[SEARCH] Query failed: ${err.message}`);
+        return { query, error: err.message, resultCount: 0 };
+      }
+    })
+  );
+
+  // Merge results from all parallel queries
+  for (const result of queryResults) {
+    const data = result.status === "fulfilled" ? result.value : { query: "unknown", error: result.reason?.message || "unknown error", resultCount: 0 };
+    queryTelemetry.push(data);
+    if (data.validUrls) {
+      for (const url of data.validUrls) allUrls.add(url);
     }
   }
 
   const urls = [...allUrls].slice(0, 6);
-  console.log(`[SEARCH] Final URLs: ${urls.join(", ")}`);
-  // Return telemetry alongside URLs instead of just the array
+  console.log(`[SEARCH] Final URLs (${urls.length}): ${urls.join(", ")}`);
   return { urls, telemetry: queryTelemetry };
+
 }
 
 function extractArticleContent(html, url) {
@@ -781,7 +789,7 @@ function mentionstool(text) {
 async function scrapeAndScore(url, anchor, keywords, isBranded = false, isToolTarget = false) {
   console.log(`[SCRAPE] Fetching ${url}`);
   try {
-    const { html, status } = await fetchWithRetry(url, 2, 18000);
+    const { html, status } = await fetchWithRetry(url, 2, 30000);
     if (isBlockedPage(html, status)) { console.log(`[SCRAPE] ${url} is blocked or captcha`); return "BLOCKED"; }
     const article = extractArticleContent(html, url);
     if (!article) { console.log(`[SCRAPE] No readable content at ${url}`); return []; }
@@ -905,7 +913,14 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
       if (blockedCount > 0) {
         throw new Error(`The target website (${domain}) is blocking our scraper (Cloudflare/Bot protection). Out of ${filteredUrls.length} URLs, ${blockedCount} were blocked. We cannot scrape this site.`);
       }
-      throw new Error(`No suitable paragraphs found (urls: ${filteredUrls.length}, scraped quality paras: ${totalQuality}). The articles might have no text, or all paragraphs contain existing links (which we skip). Try a different domain.`);
+      const scrapeErr = new Error(`No suitable paragraphs found (urls: ${filteredUrls.length}, scraped quality paras: ${totalQuality}). The articles might have no text, or all paragraphs contain existing links (which we skip). Try a different domain.`);
+      // ✅ FIX: attach diagnostic info so fallback can give honest message
+      scrapeErr.scrapeFailureInfo = {
+        urlsFound: filteredUrls.length,
+        qualityParagraphs: totalQuality,
+        urls: filteredUrls
+      };
+      throw scrapeErr;
     }
 
     // STEP 4: Context re-ranking — keep larger pool for regenerate
@@ -1213,7 +1228,8 @@ async function generateMismatchDiagnosis(domain, anchorList, targetPageInfo, sam
 
 async function runAnalysisWithFallback(domain, anchorList, linkto, excludedParagraphs, excludedArticleUrls, isBranded) {
   const attemptLog = [];
-  const allSearchTelemetry = []; // NEW: collect real telemetry across all anchor attempts
+  const allSearchTelemetry = []; // track SERP telemetry across all anchor attempts
+  const allScrapeFailures = [];  // track scraping failures across all anchor attempts
 
   for (let i = 0; i < anchorList.length; i++) {
     const currentAnchor = anchorList[i];
@@ -1236,6 +1252,10 @@ async function runAnalysisWithFallback(domain, anchorList, linkto, excludedParag
       // Collect real search telemetry from each failed attempt
       if (err.searchTelemetry) {
         allSearchTelemetry.push({ anchor: currentAnchor, telemetry: err.searchTelemetry });
+      }
+      // Collect scraping failure info (URLs found but content extraction failed)
+      if (err.scrapeFailureInfo) {
+        allScrapeFailures.push({ anchor: currentAnchor, ...err.scrapeFailureInfo });
       }
       console.log(`[FALLBACK] Anchor "${currentAnchor}" failed: ${err.message}. Trying next anchor...`);
     }
@@ -1269,6 +1289,14 @@ async function runAnalysisWithFallback(domain, anchorList, linkto, excludedParag
     err.target_url_topic = diagnosis.target_url_topic;
     err.likely_reason = diagnosis.likely_reason;
     err.suggestion = diagnosis.suggestion;
+  } else if (allScrapeFailures.length > 0) {
+    // ✅ FIX: Search found URLs but scraping yielded 0 paragraphs — likely a timeout/cold-start issue
+    const totalUrls = allScrapeFailures.reduce((s, f) => s + f.urlsFound, 0);
+    console.log(`[FALLBACK] Scrape failure detected: ${totalUrls} URLs found but 0 paragraphs extracted`);
+    err.domain_content_summary = `Found ${totalUrls} candidate articles on this domain, but was unable to extract readable content from any of them.`;
+    err.target_url_topic = "Content related to your destination URL and anchors.";
+    err.likely_reason = `Search successfully found ${totalUrls} candidate articles across ${anchorList.length} anchor variation(s), but content scraping returned 0 usable paragraphs. This commonly indicates a timeout issue (e.g. slow-starting server instance) rather than a genuine content mismatch.`;
+    err.suggestion = "This looks like a temporary infrastructure/timeout issue rather than a content problem. Try running the search again — a warm server instance responds much faster. If you consistently see this error, the domain may be blocking scrapers (Cloudflare/bot protection).";
   } else {
     // ✅ FIX: build an HONEST reason from actual telemetry, distinguishing zero-results from API errors
     const totalQueries = allSearchTelemetry.reduce((sum, a) => sum + a.telemetry.length, 0);
