@@ -350,11 +350,11 @@ export default function ToolPage() {
                   <p>{error}</p>
                 </div>
               )}
-              {error && typeof error === 'object' && error.message && !error.domain_content_summary && (
+              {error && typeof error === 'object' && (error.message || error.error) && !error.domain_content_summary && (
                 <div className="flex flex-col gap-3 p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
                   <div className="flex items-center gap-3">
                     <AlertCircle className="w-5 h-5 shrink-0" />
-                    <p>{error.message}</p>
+                    <p>{error.message || error.error}</p>
                   </div>
                   {error.suggestion && (
                     <div className="pl-8 pt-2">
