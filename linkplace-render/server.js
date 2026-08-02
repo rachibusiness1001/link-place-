@@ -436,14 +436,15 @@ function extractArticleContent(html, url) {
     const dom = new JSDOM(html, { url });
     const doc = dom.window.document;
     // Remove comment, reply, TOC, sidebar, index, and navigation sections before extraction
-    doc.querySelectorAll('[class*="comment" i], [id*="comment" i], [class*="reply" i], [id*="reply" i], [class*="disqus" i], [id*="disqus" i], [class*="toc" i], [id*="toc" i], [class*="table-of-content" i], [id*="table-of-content" i], [class*="contents" i], [id*="contents" i], [class*="sidebar" i], [id*="sidebar" i], [class*="widget" i], [id*="widget" i], [class*="menu" i], [id*="menu" i], [class*="nav" i], [id*="nav" i], [class*="index" i], [id*="index" i], [role="doc-toc" i], [role="navigation" i], [aria-label*="toc" i], [aria-label*="content" i], [aria-label*="navigation" i], nav, aside, footer, header').forEach((el) => {
+    doc.querySelectorAll('[class*="comment" i], [id*="comment" i], [class*="reply" i], [id*="reply" i], [class*="disqus" i], [id*="disqus" i], [class*="toc" i], [id*="toc" i], [class*="table-of-content" i], [id*="table-of-content" i], [class*="sidebar" i], [id*="sidebar" i], [class*="widget" i], [id*="widget" i], [class*="menu" i], [id*="menu" i], [class*="nav" i], [id*="nav" i], [class*="index" i], [id*="index" i], [role="doc-toc" i], [role="navigation" i], [aria-label*="toc" i], [aria-label*="navigation" i], nav, aside, footer, header').forEach((el) => {
       if (el && el.parentNode) el.parentNode.removeChild(el);
     });
     // Remove any containers or lists whose heading says Table of Contents, In this article, etc.
     doc.querySelectorAll("h1, h2, h3, h4, h5, h6, p, div, span, strong, b, summary").forEach((h) => {
       const txt = h.textContent.replace(/\s+/g, " ").trim();
       if (/^(table of contents?|contents|in this article|on this page|quick jump|quick links|topics covered|what('s|\s+is)\s+inside|overview)\s*$/i.test(txt)) {
-        const wrapper = h.closest("nav, aside, section, details, div[class*='toc' i], div[id*='toc' i], div[class*='content' i], div[id*='content' i], div") || h.parentNode;
+        // ✅ FIX: Removed div[class*='content' i] which was matching the entire article container (e.g. entry-content)
+        const wrapper = h.closest("nav, aside, section, details, div[class*='toc' i], div[id*='toc' i], div[class*='table-of-content' i], div[id*='table-of-content' i], div") || h.parentNode;
         if (wrapper && wrapper.parentNode && wrapper !== doc.body && wrapper.textContent.length < 5000) {
           wrapper.parentNode.removeChild(wrapper);
         } else if (h.parentNode) {
