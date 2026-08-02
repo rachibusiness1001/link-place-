@@ -11,7 +11,7 @@ const rateLimit = require("express-rate-limit");
 const crypto = require("crypto");
 
 const cors = require("cors");
-
+const fs = require("fs");
 if (!process.env.ANTHROPIC_API_KEY || !process.env.SERPAPI_KEY) {
   console.error("CRITICAL: Missing ANTHROPIC_API_KEY or SERPAPI_KEY in environment");
   process.exit(1);
@@ -441,7 +441,30 @@ const NOISE_PATTERNS = [
   /table of contents|in this article|jump to section|skip to|table of content|toc\b/i,
 ];
 
-function isQualityParagraph(text, linkCount, isToolTarget = false) {
+function hasTextCorruption(text) {
+  // Detect suspicious mid-word capital letter breaks like "mach Eine" 
+  // (lowercase word, space, then a capitalized fragment that isn't starting a new sentence)
+  const midWordBreakPattern = /\b[a-z]{2,}\s[A-Z][a-z]{1,4}\b(?!\.|,|\?|!)/g;
+  const matches = text.match(midWordBreakPattern) || [];
+  
+  // Filter out legitimate cases
+  const suspiciousMatches = matches.filter(m => {
+    const parts = m.split(/\s/);
+    return parts[1].length <= 4 && !/^(AI|US|UK|EU|IT|HR|CEO|CTO|API)$/i.test(parts[1]);
+  });
+  
+  return suspiciousMatches.length > 0;
+}
+
+function logCorruptionInstance(data) {
+  try {
+    fs.appendFileSync(path.join(__dirname, "corruption_log.jsonl"), JSON.stringify(data) + "\n");
+  } catch(e) {
+    console.error("[LOGGING] Failed to log corruption", e);
+  }
+}
+
+function isQualityParagraph(text, linkCount, isToolTarget = false, domain = "unknown", currentUrl = "unknown") {
   if (text.length < 100) return false;
   if (linkCount > 0) return false; // STAGE A.2: Zero hyperlinks already
   if (!/[.!?]["']?\s*$/.test(text)) return false; // Must be complete sentence(s) ending in punctuation
@@ -450,6 +473,18 @@ function isQualityParagraph(text, linkCount, isToolTarget = false) {
   const capsRatio = (text.match(/[A-Z]/g) || []).length / text.length;
   if (capsRatio > 0.25) return false; // STAGE A.6: Not all-caps/heading noise
   if (mentionstool(text)) return false;
+
+  if (hasTextCorruption(text)) {
+    console.log(`[CORRUPTION DETECTED] Rejected paragraph due to suspected text extraction error: "${text.slice(0, 100)}..."`);
+    logCorruptionInstance({ 
+      domain, 
+      url: currentUrl, 
+      corrupted_snippet: text.slice(0, 150), 
+      timestamp: new Date().toISOString() 
+    });
+    return false;
+  }
+
   return true;
 }
 
@@ -729,7 +764,7 @@ async function scrapeAndScore(url, anchor, keywords, isBranded = false, isToolTa
     for (let i = 0; i < eligibleParagraphs.length; i++) {
       const { text, linkCount } = eligibleParagraphs[i];
       if (seen.has(text)) continue;
-      if (!isQualityParagraph(text, linkCount, isToolTarget)) continue;
+      if (!isQualityParagraph(text, linkCount, isToolTarget, new URL(url).hostname, url)) continue;
       seen.add(text);
       const id = crypto.createHash('md5').update(url + text).digest('hex').slice(0, 10);
       const prevText = eligibleParagraphs[i - 1] ? eligibleParagraphs[i - 1].text : null;
