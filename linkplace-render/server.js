@@ -347,6 +347,8 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
   ];
 
   const allUrls = new Set();
+  const queryTelemetry = []; // NEW: track what actually happened per query
+
   for (const query of queries) {
     console.log(`[SEARCH] Query: ${query}`);
     try {
@@ -357,21 +359,45 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
         { signal: controller.signal }
       );
       clearTimeout(timer);
-      if (!res.ok) { console.log(`[SEARCH] SerpAPI ${res.status}`); continue; }
-      const data = await res.json();
-      for (const r of (data?.organic_results || [])) {
-        if (r.link && r.link.includes(domain) && isArticleUrl(r.link)) allUrls.add(r.link);
+
+      if (!res.ok) {
+        console.log(`[SEARCH] SerpAPI HTTP ${res.status}`);
+        queryTelemetry.push({ query, error: `HTTP ${res.status}`, resultCount: 0 });
+        continue;
       }
-      console.log(`[SEARCH] Total valid URLs so far: ${allUrls.size}`);
-      // ✅ FIX: removed early break at 4/6 URLs — let all queries run so broader queries aren't starved by exact-phrase hits
+
+      const data = await res.json();
+
+      // CRITICAL: log if SerpAPI itself returned an error field
+      // (rate limit, quota exceeded, invalid key, etc.)
+      if (data.error) {
+        console.log(`[SEARCH] SerpAPI ERROR: ${data.error}`);
+        queryTelemetry.push({ query, error: data.error, resultCount: 0 });
+        continue;
+      }
+
+      const rawResults = data?.organic_results || [];
+      const resultCount = rawResults.length;
+      let validUrlCount = 0;
+      for (const r of rawResults) {
+        if (r.link && r.link.includes(domain) && isArticleUrl(r.link)) {
+          allUrls.add(r.link);
+          validUrlCount++;
+        }
+      }
+      console.log(`[SEARCH] Query returned ${resultCount} raw results, ${validUrlCount} passed isArticleUrl filter`);
+      queryTelemetry.push({ query, rawResultCount: resultCount, validUrlCount });
+
     } catch (err) {
       console.log(`[SEARCH] Query failed: ${err.message}`);
+      queryTelemetry.push({ query, error: err.message, resultCount: 0 });
     }
   }
 
   const urls = [...allUrls].slice(0, 6);
   console.log(`[SEARCH] Final URLs: ${urls.join(", ")}`);
-  return urls;
+  // Return telemetry alongside URLs instead of just the array
+  return { urls, telemetry: queryTelemetry };
 }
 
 function extractArticleContent(html, url) {
@@ -813,8 +839,14 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
     const searchKeywords = [...new Set([...(linktoInfo.aiKeywords || []), ...keywords, ...linktoInfo.keywords])];
 
     // STEP 2: Search
-    const urls = await searchArticles(domain, anchor, searchKeywords, isBranded);
-    if (!urls.length) throw new Error("No articles found. Try a different domain or anchor text.");
+    const searchResult = await searchArticles(domain, anchor, searchKeywords, isBranded);
+    const urls = searchResult.urls;
+    const searchTelemetry = searchResult.telemetry;
+    if (!urls.length) {
+      const noUrlErr = new Error("No articles found. Try a different domain or anchor text.");
+      noUrlErr.searchTelemetry = searchTelemetry; // attach real telemetry to the error
+      throw noUrlErr;
+    }
 
     let linktoDomain = "";
     let cleanDomain = domain.replace(/^www\./, "").split("/")[0].toLowerCase();
@@ -1161,6 +1193,8 @@ async function generateMismatchDiagnosis(domain, anchorList, targetPageInfo, sam
 
 async function runAnalysisWithFallback(domain, anchorList, linkto, excludedParagraphs, excludedArticleUrls, isBranded) {
   const attemptLog = [];
+  const allSearchTelemetry = []; // NEW: collect real telemetry across all anchor attempts
+
   for (let i = 0; i < anchorList.length; i++) {
     const currentAnchor = anchorList[i];
     try {
@@ -1179,11 +1213,15 @@ async function runAnalysisWithFallback(domain, anchorList, linkto, excludedParag
       attemptLog.push({ anchor: currentAnchor, result: "no_placement_found" });
     } catch (err) {
       attemptLog.push({ anchor: currentAnchor, result: "error", message: err.message });
+      // Collect real search telemetry from each failed attempt
+      if (err.searchTelemetry) {
+        allSearchTelemetry.push({ anchor: currentAnchor, telemetry: err.searchTelemetry });
+      }
       console.log(`[FALLBACK] Anchor "${currentAnchor}" failed: ${err.message}. Trying next anchor...`);
     }
   }
 
-  // All anchors failed, try to generate a diagnosis
+  // All anchors failed — try to generate a diagnosis from cached paragraph pool first
   let diagnosis = null;
   try {
     let cachedPool = null;
@@ -1194,7 +1232,6 @@ async function runAnalysisWithFallback(domain, anchorList, linkto, excludedParag
         break;
       }
     }
-    
     if (cachedPool && cachedPool.topParagraphs && cachedPool.topParagraphs.length > 0) {
       diagnosis = await generateMismatchDiagnosis(domain, anchorList, cachedPool.linktoInfo, cachedPool.topParagraphs.slice(0, 5));
     }
@@ -1205,16 +1242,39 @@ async function runAnalysisWithFallback(domain, anchorList, linkto, excludedParag
   const err = new Error(`None of the ${anchorList.length} anchor variations found a suitable placement on this domain.`);
   err.code = "no_valid_placement_any_anchor";
   err.anchors_tried = anchorList;
+
   if (diagnosis) {
+    // Best case: use AI-generated mismatch diagnosis from real paragraph data
     err.domain_content_summary = diagnosis.domain_content_summary;
     err.target_url_topic = diagnosis.target_url_topic;
     err.likely_reason = diagnosis.likely_reason;
     err.suggestion = diagnosis.suggestion;
   } else {
+    // ✅ FIX: build an HONEST reason from actual telemetry instead of a hardcoded placeholder
+    const totalQueries = allSearchTelemetry.reduce((sum, a) => sum + a.telemetry.length, 0);
+    const totalRawResults = allSearchTelemetry.reduce((sum, a) =>
+      sum + a.telemetry.reduce((s, t) => s + (t.rawResultCount || 0), 0), 0);
+    const apiErrors = allSearchTelemetry.flatMap(a => a.telemetry.filter(t => t.error)).map(t => t.error);
+
+    console.log(`[FALLBACK] Telemetry summary — queries: ${totalQueries}, raw results: ${totalRawResults}, api errors: ${apiErrors.length}`);
+
     err.domain_content_summary = "Could not fetch any relevant paragraphs from this domain matching your anchors.";
     err.target_url_topic = "Content related to your destination URL and anchors.";
-    err.likely_reason = "No articles on the domain matched the search queries (0 Google search results).";
-    err.suggestion = "Try a different domain that covers this topic more broadly, or use a much more generic anchor text.";
+
+    if (apiErrors.length > 0) {
+      const uniqueErrors = [...new Set(apiErrors)];
+      err.likely_reason = `Search API errors occurred: ${uniqueErrors.join("; ")}. ${totalQueries} queries attempted across ${anchorList.length} anchor(s).`;
+      err.suggestion = "This looks like a SerpAPI issue (rate limit, quota, or invalid key) rather than a content mismatch. Check your SerpAPI account status before retrying.";
+    } else if (totalQueries === 0) {
+      err.likely_reason = "Search was never reached — all anchors may have failed before the search step.";
+      err.suggestion = "Check server logs for errors in earlier pipeline steps (keyword generation or linkto analysis).";
+    } else if (totalRawResults === 0) {
+      err.likely_reason = `Ran ${totalQueries} search queries across ${anchorList.length} anchor variation(s) — Google genuinely returned 0 raw results for all of them.`;
+      err.suggestion = "Try a different domain that covers this topic more broadly, or use a much more generic anchor text.";
+    } else {
+      err.likely_reason = `Search queries returned ${totalRawResults} raw results total across ${totalQueries} queries, but none passed the URL/content filters (isArticleUrl or paragraph quality checks).`;
+      err.suggestion = "The domain has some matching search presence but the URL or content filters may be too strict for this domain's structure. Try a different article-heavy subdomain or a different anchor.";
+    }
   }
   throw err;
 }
