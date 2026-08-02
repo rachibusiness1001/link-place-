@@ -101,39 +101,53 @@ function isArticleUrl(url) {
     const urlPath = parsed.pathname.replace(/\/$/, "");
     if (!urlPath || urlPath === "/") return false;
     if (SKIP_PREFIXES.some((p) => urlPath.toLowerCase().startsWith(p))) return false;
+
     const segments = urlPath.split("/").filter(Boolean);
     if (segments.length === 1 && INDEX_SEGMENTS.has(segments[0].toLowerCase())) return false;
     if (/\/page\/\d+/.test(urlPath) || /\/\d+$/.test(urlPath)) return false;
+
     const meaningful = segments.filter((s) => !INDEX_SEGMENTS.has(s.toLowerCase()));
     if (meaningful.length === 0) return false;
     if (/^\d{4}$/.test(segments[segments.length - 1])) return false;
-    // Must be a blog/article path — not a landing page
+
     const lowerPath = urlPath.toLowerCase();
     const isBlogPath = BLOG_PATH_INDICATORS.some((indicator) => lowerPath.includes(indicator));
-    if (!isBlogPath) return false; // STRICT RULE: Must be inside a blog section
 
-    // Reject index/listing pages — must have a meaningful slug after the blog segment
-    // e.g. /blogs/ alone or /blogs/blog*home*2 are index pages
-    const blogSegIdx = segments.findIndex((s) =>
-      ["blog", "blogs", "article", "articles", "post", "posts", "news", "insights",
-       "resources", "learn", "guide", "guides", "tips", "tutorial", "tutorials"].includes(s.toLowerCase())
-    );
-    if (blogSegIdx !== -1) {
-      const afterBlog = segments.slice(blogSegIdx + 1).filter(Boolean);
-      if (afterBlog.length === 0) return false; // /blogs/ with nothing after = index
-      const slug = afterBlog[afterBlog.length - 1];
-      // Reject slugs that look like pagination or junk (contain * or are just numbers)
-      if (/\*/.test(slug)) return false;
-      if (/^\d+$/.test(slug)) return false;
-      // Slug must be reasonably long and word-like
-      if (slug.length < 5) return false;
+    if (isBlogPath) {
+      // Strict validation for confirmed blog-path URLs (unchanged)
+      const blogSegIdx = segments.findIndex((s) =>
+        ["blog", "blogs", "article", "articles", "post", "posts", "news", "insights",
+         "resources", "learn", "guide", "guides", "tips", "tutorial", "tutorials"].includes(s.toLowerCase())
+      );
+      if (blogSegIdx !== -1) {
+        const afterBlog = segments.slice(blogSegIdx + 1).filter(Boolean);
+        if (afterBlog.length === 0) return false; // /blogs/ with nothing after = index
+        const slug = afterBlog[afterBlog.length - 1];
+        if (/\*/.test(slug)) return false;
+        if (/^\d+$/.test(slug)) return false;
+        if (slug.length < 5) return false;
+      } else {
+        const slug = segments[segments.length - 1];
+        if (/\*/.test(slug) || /^\d+$/.test(slug) || slug.length < 5) return false;
+      }
+      return true;
     } else {
-      const slug = segments[segments.length - 1];
-      if (/\*/.test(slug) || /^\d+$/.test(slug) || slug.length < 5) return false;
+      // ✅ NEW: No blog-path prefix — common on flat-URL sites like ipwithease.com
+      // (root-level WordPress slugs). Apply slug-quality heuristics instead of
+      // hard-rejecting: single-segment, long slug, multiple hyphen-separated words.
+      if (segments.length !== 1) return false; // multi-segment non-blog paths = likely category/nav structures
+      const slug = segments[0];
+      if (/\*/.test(slug) || /^\d+$/.test(slug)) return false;
+      if (slug.length < 8) return false; // root-level article slugs are typically descriptive/long
+      // Must look like a real article slug: at least 3 hyphen-separated words
+      // e.g. "about-us" (2 words) → rejected; "ids-ips-in-cloud-environments" (5 words) → accepted
+      const wordCount = slug.split("-").filter(Boolean).length;
+      if (wordCount < 3) return false;
+      return true;
     }
-    return true;
   } catch { return false; }
 }
+
 
 const STOP_WORDS = new Set([
   "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of",
