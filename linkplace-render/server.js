@@ -337,12 +337,13 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
     `site:${domain} ${keywords[0] || "software"}`,
     `site:${domain} ${keywords[1] || "tool"}`
   ] : [
-    // ✅ FIX: Broad topical keywords FIRST — this finds mid-article discussion paragraphs
-    `site:${domain} ${keywords.slice(0, 3).join(" ")}`,
-    `site:${domain} ${keywords[0] || ""} ${keywords[1] || ""}`,
+    // Single most-important keyword FIRST — broadest, highest chance of results
     `site:${domain} ${keywords[0] || "blog"}`,
-    // ✅ FIX: Exact anchor phrase now LAST — only used as a supplementary source,
-    // not the primary driver (this was causing intro-paragraph bias)
+    // 2-keyword combo — moderate restriction
+    `site:${domain} ${keywords[0] || ""} ${keywords[1] || ""}`,
+    // 3-keyword combo — most restrictive, kept as a bonus attempt
+    `site:${domain} ${keywords.slice(0, 3).join(" ")}`,
+    // Exact anchor phrase LAST — supplementary only
     `site:${domain} "${phrase}"`,
   ];
 
@@ -368,11 +369,16 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
 
       const data = await res.json();
 
-      // CRITICAL: log if SerpAPI itself returned an error field
-      // (rate limit, quota exceeded, invalid key, etc.)
+      // Distinguish genuine zero-results (normal) from real API errors (quota/key/etc.)
       if (data.error) {
-        console.log(`[SEARCH] SerpAPI ERROR: ${data.error}`);
-        queryTelemetry.push({ query, error: data.error, resultCount: 0 });
+        const isZeroResults = /hasn't returned any results|no results found/i.test(data.error);
+        if (isZeroResults) {
+          console.log(`[SEARCH] Zero results (normal, not an error): ${query}`);
+          queryTelemetry.push({ query, rawResultCount: 0, isZeroResults: true });
+        } else {
+          console.log(`[SEARCH] SerpAPI ERROR: ${data.error}`);
+          queryTelemetry.push({ query, error: data.error, resultCount: 0, isZeroResults: false });
+        }
         continue;
       }
 
@@ -1250,13 +1256,15 @@ async function runAnalysisWithFallback(domain, anchorList, linkto, excludedParag
     err.likely_reason = diagnosis.likely_reason;
     err.suggestion = diagnosis.suggestion;
   } else {
-    // ✅ FIX: build an HONEST reason from actual telemetry instead of a hardcoded placeholder
+    // ✅ FIX: build an HONEST reason from actual telemetry, distinguishing zero-results from API errors
     const totalQueries = allSearchTelemetry.reduce((sum, a) => sum + a.telemetry.length, 0);
     const totalRawResults = allSearchTelemetry.reduce((sum, a) =>
       sum + a.telemetry.reduce((s, t) => s + (t.rawResultCount || 0), 0), 0);
-    const apiErrors = allSearchTelemetry.flatMap(a => a.telemetry.filter(t => t.error)).map(t => t.error);
+    // Only treat entries with .error AND isZeroResults===false as real API errors
+    const apiErrors = allSearchTelemetry.flatMap(a => a.telemetry.filter(t => t.error && !t.isZeroResults)).map(t => t.error);
+    const zeroResultQueries = allSearchTelemetry.flatMap(a => a.telemetry.filter(t => t.isZeroResults));
 
-    console.log(`[FALLBACK] Telemetry summary — queries: ${totalQueries}, raw results: ${totalRawResults}, api errors: ${apiErrors.length}`);
+    console.log(`[FALLBACK] Telemetry summary — queries: ${totalQueries}, raw results: ${totalRawResults}, api errors: ${apiErrors.length}, zero-result queries: ${zeroResultQueries.length}`);
 
     err.domain_content_summary = "Could not fetch any relevant paragraphs from this domain matching your anchors.";
     err.target_url_topic = "Content related to your destination URL and anchors.";
@@ -1268,8 +1276,12 @@ async function runAnalysisWithFallback(domain, anchorList, linkto, excludedParag
     } else if (totalQueries === 0) {
       err.likely_reason = "Search was never reached — all anchors may have failed before the search step.";
       err.suggestion = "Check server logs for errors in earlier pipeline steps (keyword generation or linkto analysis).";
+    } else if (zeroResultQueries.length > 0 && totalRawResults === 0) {
+      // All queries returned zero results — likely over-restrictive query construction, not missing content
+      err.likely_reason = `All ${totalQueries} search queries across ${anchorList.length} anchor variation(s) returned zero Google results. This usually means the queries were too specific (combining too many keywords), not that the domain lacks relevant content.`;
+      err.suggestion = "Try shorter, broader anchor phrases (2-3 words max), or manually verify the domain has relevant content on this topic.";
     } else if (totalRawResults === 0) {
-      err.likely_reason = `Ran ${totalQueries} search queries across ${anchorList.length} anchor variation(s) — Google genuinely returned 0 raw results for all of them.`;
+      err.likely_reason = `Ran ${totalQueries} search queries across ${anchorList.length} anchor variation(s) — Google returned 0 raw results for all of them.`;
       err.suggestion = "Try a different domain that covers this topic more broadly, or use a much more generic anchor text.";
     } else {
       err.likely_reason = `Search queries returned ${totalRawResults} raw results total across ${totalQueries} queries, but none passed the URL/content filters (isArticleUrl or paragraph quality checks).`;
