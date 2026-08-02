@@ -366,7 +366,7 @@ export default function ToolPage() {
                   )}
                   {error.anchors_tried && (
                     <div className="pl-8 pt-2 text-white/50 text-xs">
-                      Tried Anchors ({error.anchors_tried.length}): {error.anchors_tried.map((a: string) => \`'\${a}'\`).join(', ')}
+                      Tried Anchors ({error.anchors_tried.length}): {error.anchors_tried.map((a: string) => `'${a}'`).join(', ')}
                     </div>
                   )}
                 </div>
@@ -390,7 +390,7 @@ export default function ToolPage() {
                   </div>
                   {error.anchors_tried && (
                     <div className="text-white/50 text-xs mb-3">
-                      Tried Anchors ({error.anchors_tried.length}): {error.anchors_tried.map((a: string) => \`'\${a}'\`).join(', ')}
+                      Tried Anchors ({error.anchors_tried.length}): {error.anchors_tried.map((a: string) => `'${a}'`).join(', ')}
                     </div>
                   )}
                   <div className="flex flex-wrap gap-3 mt-1">
