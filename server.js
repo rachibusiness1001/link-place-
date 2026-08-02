@@ -1146,9 +1146,14 @@ async function runAnalysisWithFallback(domain, anchorList, linkto, excludedParag
   // All anchors failed, try to generate a diagnosis
   let diagnosis = null;
   try {
-    const lastAnchor = anchorList[anchorList.length - 1];
-    const poolKey = `pool::${domain}::${lastAnchor.toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${isBranded}::${excludedArticleUrls.length}`;
-    const cachedPool = paragraphPoolCache.get(poolKey);
+    let cachedPool = null;
+    for (const a of anchorList) {
+      const poolKey = `pool::${domain}::${a.toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${isBranded}::${excludedArticleUrls.length}`;
+      cachedPool = paragraphPoolCache.get(poolKey);
+      if (cachedPool && cachedPool.topParagraphs && cachedPool.topParagraphs.length > 0) {
+        break;
+      }
+    }
     
     if (cachedPool && cachedPool.topParagraphs && cachedPool.topParagraphs.length > 0) {
       diagnosis = await generateMismatchDiagnosis(domain, anchorList, cachedPool.linktoInfo, cachedPool.topParagraphs.slice(0, 5));
@@ -1165,6 +1170,11 @@ async function runAnalysisWithFallback(domain, anchorList, linkto, excludedParag
     err.target_url_topic = diagnosis.target_url_topic;
     err.likely_reason = diagnosis.likely_reason;
     err.suggestion = diagnosis.suggestion;
+  } else {
+    err.domain_content_summary = "Could not fetch any relevant paragraphs from this domain matching your anchors.";
+    err.target_url_topic = "Content related to your destination URL and anchors.";
+    err.likely_reason = "No articles on the domain matched the search queries (0 Google search results).";
+    err.suggestion = "Try a different domain that covers this topic more broadly, or use a much more generic anchor text.";
   }
   throw err;
 }
