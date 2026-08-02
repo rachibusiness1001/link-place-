@@ -379,7 +379,7 @@ export default function BrandedAnchorPage() {
                       type="button" 
                       onClick={(e) => {
                         const btn = e.currentTarget;
-                        const copyText = \`⚠️ No suitable placement found\n\nThis domain's content: \${error.domain_content_summary}\nTarget URL is about: \${error.target_url_topic}\nLikely reason: \${error.likely_reason === 'topic_mismatch' ? 'Topic mismatch between domain content and target URL' : error.likely_reason}\n\n💡 Suggestion: \${error.suggestion}\`;
+                        const copyText = `⚠️ No suitable placement found\n\nThis domain's content: ${error.domain_content_summary}\nTarget URL is about: ${error.target_url_topic}\nLikely reason: ${error.likely_reason === 'topic_mismatch' ? 'Topic mismatch between domain content and target URL' : error.likely_reason}\n\n💡 Suggestion: ${error.suggestion}`;
                         navigator.clipboard.writeText(copyText).then(() => {
                           btn.innerText = 'Copied!';
                           setTimeout(() => { btn.innerText = '📋 Copy explanation for client'; }, 2000);
