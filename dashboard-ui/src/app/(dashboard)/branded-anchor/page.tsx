@@ -337,9 +337,6 @@ export default function BrandedAnchorPage() {
                   {error.suggestion && (
                     <div className="pl-8 pt-2">
                       <b className="text-white">💡 Suggestion:</b> {error.suggestion}
-                      <button type="button" onClick={handleInitialClick} className="mt-3 block px-4 py-2 bg-white/5 border border-white/10 rounded text-white text-xs hover:bg-white/10 transition-colors">
-                        ✨ Select & Try Other Anchor Variations
-                      </button>
                     </div>
                   )}
                   {error.anchors_tried && (
@@ -371,10 +368,6 @@ export default function BrandedAnchorPage() {
                       Tried Anchors ({error.anchors_tried.length}): {error.anchors_tried.map((a: string) => `'${a}'`).join(', ')}
                     </div>
                   )}
-                  <div className="flex flex-wrap gap-3 mt-1">
-                    <button type="button" onClick={handleInitialClick} className="px-4 py-2 bg-[#7c6dfa] hover:bg-[#6855fa] text-white rounded-md text-sm transition-colors font-medium">
-                      ✨ Select & Try Other Anchor Variations
-                    </button>
                     <button 
                       type="button" 
                       onClick={(e) => {
