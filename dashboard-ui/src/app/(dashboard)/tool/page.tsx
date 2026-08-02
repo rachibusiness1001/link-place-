@@ -404,7 +404,6 @@ export default function ToolPage() {
                     >
                       📋 Copy explanation for client
                     </button>
-                  </div>
                 </div>
               )}
 

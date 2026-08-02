@@ -355,7 +355,6 @@ export default function BrandedAnchorPage() {
                     >
                       📋 Copy explanation for client
                     </button>
-                  </div>
                 </div>
               )}
 
