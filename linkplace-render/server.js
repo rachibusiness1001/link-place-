@@ -267,7 +267,7 @@ Return ONLY a valid JSON array of exactly 5 strings, nothing else — no markdow
 async function analyzeLinktoPage(linkto) {
   console.log(`[LINKTO] Analyzing destination URL: ${linkto}`);
   try {
-    const { html, status } = await fetchWithRetry(linkto, 1, 20000);
+    const { html, status } = await fetchWithRetry(linkto, 1, 8000); // title/meta only needed, 8s is enough
     if (isBlockedPage(html, status)) {
       console.log(`[LINKTO] Blocked, using URL slug only`);
       return extractLinktoFromSlug(linkto);
@@ -370,7 +370,7 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
     queries.map(async (query) => {
       console.log(`[SEARCH] Query: ${query}`);
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 8000);
+      const timer = setTimeout(() => controller.abort(), 6000); // ✅ PERF: SerpAPI is fast, 6s enough
       try {
         const res = await fetch(
           `https://serpapi.com/search?${new URLSearchParams({ q: query, api_key: process.env.SERPAPI_KEY, engine: "google", num: "10" })}`,
@@ -661,7 +661,7 @@ async function analyzeWithAI(paragraphs, anchor, linkto, linktoInfo, isBranded =
     ? paragraphs.filter((p) => !mentionstool(p.text))
     : paragraphs;
 
-  const finalPool = (pool.length >= 4 ? pool : paragraphs).slice(0, 12);
+  const finalPool = (pool.length >= 4 ? pool : paragraphs).slice(0, 8); // ✅ PERF: reduced from 12 to 8 — smaller AI input = faster response
 
   const getTierLabel = (score) => {
     if (score >= 45) return "TIER 1 (STRONG match)";
@@ -672,8 +672,8 @@ async function analyzeWithAI(paragraphs, anchor, linkto, linktoInfo, isBranded =
   // ✅ FIX: include previous/next paragraph snippets so Haiku understands 
   // the surrounding narrative flow, not just an isolated paragraph
   const formatParagraphForAI = (p, idx) => {
-    const prevSnippet = p.prevText ? p.prevText.slice(0, 120) : "(none — start of eligible section)";
-    const nextSnippet = p.nextText ? p.nextText.slice(0, 120) : "(none — end of eligible section)";
+    const prevSnippet = p.prevText ? p.prevText.slice(0, 80) : "(none)";
+    const nextSnippet = p.nextText ? p.nextText.slice(0, 80) : "(none)"; // ✅ PERF: shorter context snippets
     return `[${idx}] (Article: ${p.url}, Score: ${p.score ? p.score.toFixed(1) : 0} — ${getTierLabel(p.score || 0)})
 Previous context: "...${prevSnippet}"
 PARAGRAPH: ${p.text}
@@ -755,10 +755,10 @@ Return this exact JSON with two suggestions:
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(25000),
     body: JSON.stringify({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 2500,
+      max_tokens: 1800, // ✅ PERF: reduced from 2500 — 2 placements don't need 2500 tokens
       temperature: 0.1,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],
@@ -969,7 +969,7 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
   }
   diversePool.sort((a, b) => b.score - a.score);
 
-  const sendToAI = diversePool.slice(0, 12);
+  const sendToAI = diversePool.slice(0, 8); // ✅ PERF: reduced from 12 to 8
   console.log(`[RANK] Sending ${sendToAI.length} paragraphs to AI (from ${Object.keys(grouped).length} distinct URLs, Branded Mode: ${isBranded})`);
 
   const aiSuggestions = await analyzeWithAI(sendToAI, anchor, linkto, linktoInfo, isBranded);
