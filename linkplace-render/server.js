@@ -455,21 +455,30 @@ function extractArticleContent(html, url) {
     const pCountBefore = doc.querySelectorAll("p").length;
     console.log(`[EXTRACT-DEBUG] ${url} — pCountBefore=${pCountBefore}`);
 
-    // Remove comment, reply, TOC, sidebar, index, and navigation sections before extraction
-    doc.querySelectorAll('[class*="comment" i], [id*="comment" i], [class*="reply" i], [id*="reply" i], [class*="disqus" i], [id*="disqus" i], [class*="toc" i], [id*="toc" i], [class*="table-of-content" i], [id*="table-of-content" i], [class*="sidebar" i], [id*="sidebar" i], [class*="widget" i], [id*="widget" i], [class*="menu" i], [id*="menu" i], [class*="nav" i], [id*="nav" i], [class*="index" i], [id*="index" i], [role="doc-toc" i], [role="navigation" i], [aria-label*="toc" i], [aria-label*="navigation" i], nav, aside, footer, header').forEach((el) => {
+    // ✅ PERMANENT FIX: Use TARGETED selectors only — broad wildcards like class*="nav",
+    // class*="index", class*="widget" were matching ipwithease.com article containers
+    // and deleting ALL paragraphs before Readability ran. Readability itself works fine.
+    doc.querySelectorAll([
+      // Comment systems (specific, safe)
+      '.comments-area', '#comments', '.comment-list', '.comment-respond',
+      '#disqus_thread', '.disqus-container', '[class*="disqus"]',
+      // TOC (specific patterns only)
+      '.ez-toc-container', '.wp-block-table-of-contents', '[class*="ez-toc"]',
+      '[class*="table_of_contents"]', '#toc_container', '.toc_widget',
+      // Navigation elements (HTML element + role, NOT class wildcards)
+      'nav', '[role="navigation"]', '[role="doc-toc"]',
+      // Sidebars (specific, safe)
+      '.sidebar', '#sidebar', '.widget-area', '#secondary',
+      '[role="complementary"]',
+      // Layout chrome
+      'aside', 'footer', 'header',
+      '.site-header', '.site-footer', '.page-header',
+      // Social sharing
+      '.sharedaddy', '.share-buttons', '.social-share',
+      // Ads
+      '.advertisement', '.ad-container', '[class*="adsense"]',
+    ].join(', ')).forEach((el) => {
       if (el && el.parentNode) el.parentNode.removeChild(el);
-    });
-    // Remove TOC heading containers
-    doc.querySelectorAll("h1, h2, h3, h4, h5, h6, p, div, span, strong, b, summary").forEach((h) => {
-      const txt = h.textContent.replace(/\s+/g, " ").trim();
-      if (/^(table of contents?|contents|in this article|on this page|quick jump|quick links|topics covered|what('s|\s+is)\s+inside|overview)\s*$/i.test(txt)) {
-        const wrapper = h.closest("nav, aside, section, details, div[class*='toc' i], div[id*='toc' i], div[class*='table-of-content' i], div[id*='table-of-content' i], div") || h.parentNode;
-        if (wrapper && wrapper.parentNode && wrapper !== doc.body && wrapper.textContent.length < 5000) {
-          wrapper.parentNode.removeChild(wrapper);
-        } else if (h.parentNode) {
-          h.parentNode.removeChild(h);
-        }
-      }
     });
 
     // ✅ DIAGNOSTIC: paragraph count AFTER our cleanup
