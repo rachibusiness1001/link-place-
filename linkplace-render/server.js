@@ -428,22 +428,41 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
 
 }
 
+// ─── TEMP DIAGNOSTIC: Raw Readability without ANY of our pre-processing ────────
+function debugRawReadability(html, url) {
+  try {
+    const dom = new JSDOM(html, { url });
+    const pCount = dom.window.document.querySelectorAll("p").length;
+    const reader = new Readability(dom.window.document);
+    const article = reader.parse();
+    console.log(`[RAW-READABILITY-DEBUG] ${url} — pCount=${pCount}, article=${!!article}, textLength=${article?.textContent?.length || 0}`);
+  } catch (err) {
+    console.log(`[RAW-READABILITY-DEBUG] ${url} — threw: ${err.message}`);
+  }
+}
+
 function extractArticleContent(html, url) {
+  // TEMP: run raw Readability first to isolate whether our cleanup or Readability itself is the issue
+  debugRawReadability(html, url);
+
   try {
     console.log(`[EXTRACT-DEBUG] HTML length for ${url}: ${html.length} chars`);
-    console.log(`[EXTRACT-DEBUG] First 300 chars: ${html.slice(0, 300).replace(/\n/g, ' ')}`);
 
     const dom = new JSDOM(html, { url });
     const doc = dom.window.document;
+
+    // ✅ DIAGNOSTIC: paragraph count BEFORE our cleanup
+    const pCountBefore = doc.querySelectorAll("p").length;
+    console.log(`[EXTRACT-DEBUG] ${url} — pCountBefore=${pCountBefore}`);
+
     // Remove comment, reply, TOC, sidebar, index, and navigation sections before extraction
     doc.querySelectorAll('[class*="comment" i], [id*="comment" i], [class*="reply" i], [id*="reply" i], [class*="disqus" i], [id*="disqus" i], [class*="toc" i], [id*="toc" i], [class*="table-of-content" i], [id*="table-of-content" i], [class*="sidebar" i], [id*="sidebar" i], [class*="widget" i], [id*="widget" i], [class*="menu" i], [id*="menu" i], [class*="nav" i], [id*="nav" i], [class*="index" i], [id*="index" i], [role="doc-toc" i], [role="navigation" i], [aria-label*="toc" i], [aria-label*="navigation" i], nav, aside, footer, header').forEach((el) => {
       if (el && el.parentNode) el.parentNode.removeChild(el);
     });
-    // Remove any containers or lists whose heading says Table of Contents, In this article, etc.
+    // Remove TOC heading containers
     doc.querySelectorAll("h1, h2, h3, h4, h5, h6, p, div, span, strong, b, summary").forEach((h) => {
       const txt = h.textContent.replace(/\s+/g, " ").trim();
       if (/^(table of contents?|contents|in this article|on this page|quick jump|quick links|topics covered|what('s|\s+is)\s+inside|overview)\s*$/i.test(txt)) {
-        // ✅ FIX: Removed div[class*='content' i] which was matching the entire article container (e.g. entry-content)
         const wrapper = h.closest("nav, aside, section, details, div[class*='toc' i], div[id*='toc' i], div[class*='table-of-content' i], div[id*='table-of-content' i], div") || h.parentNode;
         if (wrapper && wrapper.parentNode && wrapper !== doc.body && wrapper.textContent.length < 5000) {
           wrapper.parentNode.removeChild(wrapper);
@@ -452,12 +471,16 @@ function extractArticleContent(html, url) {
         }
       }
     });
+
+    // ✅ DIAGNOSTIC: paragraph count AFTER our cleanup
+    const pCountAfter = doc.querySelectorAll("p").length;
+    console.log(`[EXTRACT-DEBUG] ${url} — pCountAfter=${pCountAfter} (removed ${pCountBefore - pCountAfter} paragraphs)`);
+
     const reader = new Readability(doc);
     const article = reader.parse();
     if (!article || !article.content || article.textContent.length < 200) {
-      // ✅ DIAGNOSTIC: log exactly why extraction failed
-      console.log(`[EXTRACT-DEBUG] FAILED for ${url}: article=${!!article}, hasContent=${!!article?.content}, textLength=${article?.textContent?.length || 0}`);
-      console.log(`[EXTRACT-DEBUG] Page title tag: ${dom.window.document.title}`);
+      console.log(`[EXTRACT-DEBUG] FAILED for ${url}: article=${!!article}, hasContent=${!!article?.content}, textLength=${article?.textContent?.length || 0}, pCountBefore=${pCountBefore}, pCountAfter=${pCountAfter}`);
+      console.log(`[EXTRACT-DEBUG] Page title tag: ${doc.title}`);
       return null;
     }
     console.log(`[EXTRACT] ${article.textContent.length} chars, title: "${article.title?.slice(0, 60)}"`);
