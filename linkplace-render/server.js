@@ -197,6 +197,7 @@ Rules:
 - Include related concepts, synonyms, industry terms
 - Include both broad and specific terms
 - Keywords should help find informational blog articles
+- In addition to direct keywords, also generate 4-5 'broader context' keywords — terms for adjacent topics or use-cases where this anchor's concept would naturally appear as a SUB-TOPIC rather than the main subject. For example, for anchor 'how to reduce LLM hallucinations', broader context keywords might include: 'AI agent development', 'RAG implementation', 'AI reliability', 'prompt engineering guardrails', 'AI agent accuracy' — topics where hallucination mitigation is discussed as part of a larger guide, not as the sole focus.
 - Return ONLY comma-separated keywords`,
         }],
       }),
@@ -359,6 +360,9 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
     `site:${domain} ${keywords.slice(0, 3).join(" ")}`,
     // Exact anchor phrase LAST — supplementary only
     `site:${domain} "${phrase}"`,
+    // Broader context searches (using the last generated keywords)
+    `site:${domain} ${keywords[keywords.length - 1] || "strategy"}`,
+    `site:${domain} ${keywords[keywords.length - 2] || "guide"}`,
   ];
 
   const allUrls = new Set();
@@ -738,8 +742,10 @@ STAGE C — TIERED SELECTION LADDER
 ALWAYS pick from the highest tier that has candidate paragraphs available in the list below:
 - TIER 1 (score ≥ 45): STRONG match. Use natural fit or light creative edit. High confidence placement.
 - TIER 2 (score 25–44): MODERATE match — topic is adjacent/related but not a perfect overlap. Use creative edit to bridge the connection. This is normal and expected, NOT a failure state. Write the bridging sentence so it reads as a natural, helpful addition (e.g., "for readers who want to go deeper into X, [anchor] covers...").
-- TIER 3 (score < 25): LAST RESORT tier — paragraph discusses a genuinely related broad domain (same industry/skill/technology family) but not a close match. Use creative edit to bridge. Frame the link as a helpful related resource/next-step rather than claiming direct topical overlap (e.g., "on a related note," "for those looking to build this skill further,"). Only use if Tier 1 and Tier 2 have zero candidates.
-ONLY return failure if literally nothing touches the target URL's broad subject area at all (e.g., a cooking recipe for an AI software target).
+- TIER 3 (score 10–24): LAST RESORT — paragraph discusses a genuinely related broad domain (same industry/skill/technology family). Use creative edit to bridge, with honest framing ("on a related note," "for those exploring this area further").
+- TIER 4 (score < 10, or no genuinely on-topic paragraph exists) — ABSOLUTE LAST RESORT, ONLY used if Tiers 1-3 have zero candidates: Pick the paragraph from the candidate pool whose GENERAL SUBJECT AREA is closest to the target topic (e.g. both are about "AI/technology" broadly, even if not the same specific sub-topic). Add a clearly-framed, honest bridging sentence using explicit "further reading" or "related resource" language — for example: "For more on related AI reliability topics, see [[anchor]]." or "Readers interested in a related AI topic may find [[anchor]] useful."
+  CRITICAL RULE FOR TIER 4: The bridge must NOT invent a fake conceptual parallel between unrelated fields (e.g. comparing "JavaScript loading order" to "LLM hallucinations" via the word "sequencing" — THIS IS FORBIDDEN). Instead, Tier 4 bridges should be honest "by the way, here's a related link" style additions that do NOT claim any deep conceptual connection — they simply acknowledge the topics are both broadly AI/tech-related and offer the anchor as an aside, without pretending the paragraph's specific content relates to it.
+DO NOT return failure due to low relevance alone. Only return failure if the ENTIRE domain has absolutely nothing related to technology/AI/software at all (e.g. a cooking or gardening blog) — in ALL other cases, Tier 4 must produce a placement.
 
 ═══════════════════════════════════════
 STAGE D — PLACEMENT & EDITING RULES (CRITICAL)
