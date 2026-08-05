@@ -71,7 +71,7 @@ export default function BrandedAnchorPage() {
 
     const stepInterval = setInterval(() => {
       setLoadingStep((prev) => Math.min(prev + 1, LOADING_STEPS.length - 1));
-    }, 2000);
+    }, 5000); // Increased from 2000 to 5000 to better match the ~25s backend processing time
 
     const anchorsToTry = [anchor];
     if (altAnchor) {
