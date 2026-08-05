@@ -179,26 +179,20 @@ async function generateKeywordsWithAI(anchor, linkto, linktoInfo = null, isBrand
         "x-api-key": process.env.ANTHROPIC_API_KEY,
         "anthropic-version": "2023-06-01",
       },
-      signal: AbortSignal.timeout(12000),
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 80,
-        temperature: 0.2,
-        system: "You are an SEO keyword expert. Return ONLY a comma-separated list of keywords. No explanation, no numbering, no extra text.",
+      signal: A        temperature: 0.2,
+        system: "You are an SEO keyword expert. Return ONLY valid JSON containing two arrays: 'directKeywords' and 'broaderKeywords'. No explanation, no markdown.",
         messages: [{
           role: "user",
-          content: `Generate 10-12 semantic search keywords for finding blog articles where this anchor text would naturally fit.
+          content: `Generate semantic search keywords for finding blog articles where this anchor text would naturally fit.
 Anchor: "${anchor}"
 Target Page URL: ${linkto}
 Target Page Title: ${linktoInfo?.title || ''}
 Target Page Snippet: ${linktoInfo?.snippet || ''}
 ${brandedInstructions}
 Rules:
-- Include related concepts, synonyms, industry terms
-- Include both broad and specific terms
-- Keywords should help find informational blog articles
-- In addition to direct keywords, also generate 4-5 'broader context' keywords — terms for adjacent topics or use-cases where this anchor's concept would naturally appear as a SUB-TOPIC rather than the main subject. For example, for anchor 'how to reduce LLM hallucinations', broader context keywords might include: 'AI agent development', 'RAG implementation', 'AI reliability', 'prompt engineering guardrails', 'AI agent accuracy' — topics where hallucination mitigation is discussed as part of a larger guide, not as the sole focus.
-- Return ONLY comma-separated keywords`,
+- 'directKeywords': 10-12 direct keywords (synonyms, related concepts, specific terms)
+- 'broaderKeywords': 4-5 broader context keywords (adjacent topics or use-cases where this anchor's concept would naturally appear as a SUB-TOPIC). Example: for anchor 'how to reduce LLM hallucinations', broader keywords might be 'AI agent development', 'RAG implementation', 'AI reliability'.
+Return ONLY a JSON object with these two arrays.`,
         }],
       }),
     });
@@ -208,15 +202,27 @@ Rules:
 
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
     console.log(`[KEYWORDS] AI generated: ${text}`);
+    
+    let parsed;
+    try {
+      parsed = JSON.parse(text.replace(/^```json\s*|```\s*$/g, "").trim());
+    } catch(e) {
+      parsed = { directKeywords: text.split(","), broaderKeywords: [] };
+    }
 
-    const aiKeywords = text.split(",").map((k) => k.trim().toLowerCase()).filter((k) => k.length > 2 && !STOP_WORDS.has(k));
+    const aiKeywords = (parsed.directKeywords || []).map((k) => k.trim().toLowerCase()).filter((k) => k.length > 2 && !STOP_WORDS.has(k));
+    const broaderKeywords = (parsed.broaderKeywords || []).map((k) => k.trim().toLowerCase()).filter((k) => k.length > 2 && !STOP_WORDS.has(k));
     const localKeywords = extractKeywordsLocal(anchor);
 
     // Merge AI + local, deduplicated
     const merged = [...new Set([...localKeywords, ...aiKeywords])];
     console.log(`[KEYWORDS] Final merged (${merged.length}): ${merged.join(", ")}`);
-    return merged;
+    return { merged, broader: broaderKeywords };
   } catch (err) {
+    console.log(`[KEYWORDS] AI failed, falling back to local: ${err.message}`);
+    return { merged: extractKeywordsLocal(anchor), broader: [] };
+  }
+}{
     console.log(`[KEYWORDS] AI failed, falling back to local: ${err.message}`);
     return extractKeywordsLocal(anchor);
   }
@@ -345,8 +351,11 @@ async function fetchWithRetry(url, maxAttempts = 2, timeoutMs = 30000) {
   }
 }
 
-async function searchArticles(domain, anchor, keywords, isBranded = false) {
+async function searchArticles(domain, anchor, keywords, isBranded = false, broaderKeywords = []) {
   const phrase = anchor.toLowerCase().trim();
+  const broader1 = broaderKeywords[0] || "strategy";
+  const broader2 = broaderKeywords[1] || "guide";
+  
   const queries = isBranded ? [
     `site:${domain} ${keywords.slice(0, 2).join(" ")}`,
     `site:${domain} ${keywords[0] || "software"}`,
@@ -360,10 +369,12 @@ async function searchArticles(domain, anchor, keywords, isBranded = false) {
     `site:${domain} ${keywords.slice(0, 3).join(" ")}`,
     // Exact anchor phrase LAST — supplementary only
     `site:${domain} "${phrase}"`,
-    // Broader context searches (using the last generated keywords)
-    `site:${domain} ${keywords[keywords.length - 1] || "strategy"}`,
-    `site:${domain} ${keywords[keywords.length - 2] || "guide"}`,
+    // Broader context searches
+    `site:${domain} ${broader1}`,
+    `site:${domain} ${broader2}`,
   ];
+  
+  console.log(`[BROADER-CONTEXT] Search queries used: site:${domain} ${broader1} | site:${domain} ${broader2}`);
 
   const allUrls = new Set();
   const queryTelemetry = [];
@@ -744,7 +755,17 @@ ALWAYS pick from the highest tier that has candidate paragraphs available in the
 - TIER 2 (score 25–44): MODERATE match — topic is adjacent/related but not a perfect overlap. Use creative edit to bridge the connection. This is normal and expected, NOT a failure state. Write the bridging sentence so it reads as a natural, helpful addition (e.g., "for readers who want to go deeper into X, [anchor] covers...").
 - TIER 3 (score 10–24): LAST RESORT — paragraph discusses a genuinely related broad domain (same industry/skill/technology family). Use creative edit to bridge, with honest framing ("on a related note," "for those exploring this area further").
 - TIER 4 (score < 10, or no genuinely on-topic paragraph exists) — ABSOLUTE LAST RESORT, ONLY used if Tiers 1-3 have zero candidates: Pick the paragraph from the candidate pool whose GENERAL SUBJECT AREA is closest to the target topic (e.g. both are about "AI/technology" broadly, even if not the same specific sub-topic). Add a clearly-framed, honest bridging sentence using explicit "further reading" or "related resource" language — for example: "For more on related AI reliability topics, see [[anchor]]." or "Readers interested in a related AI topic may find [[anchor]] useful."
-  CRITICAL RULE FOR TIER 4: The bridge must NOT invent a fake conceptual parallel between unrelated fields (e.g. comparing "JavaScript loading order" to "LLM hallucinations" via the word "sequencing" — THIS IS FORBIDDEN). Instead, Tier 4 bridges should be honest "by the way, here's a related link" style additions that do NOT claim any deep conceptual connection — they simply acknowledge the topics are both broadly AI/tech-related and offer the anchor as an aside, without pretending the paragraph's specific content relates to it.
+  
+  CRITICAL SUB-RULE — REJECT SUPERFICIAL WORDPLAY ANALOGIES:
+  Before writing any bridge, apply this concrete test: 
+  Take the paragraph's literal subject (e.g. 'font size selection for blog readability') and the target's literal subject (e.g. 'LLM hallucination reduction'). Write down: 'A professional who works in [paragraph's field] would/would not recognize [target's field] as something they regularly deal with in their job.' 
+  If the honest answer is 'would NOT' — meaning a blog designer would never actually encounter or need to think about LLM hallucinations in their normal work, and an AI engineer would never need to think about font sizes to solve hallucinations — then ANY bridge you write is a forced wordplay analogy, REGARDLESS of how elegant the sentence sounds. This applies even if both topics share an abstract word like 'clarity,' 'confusion,' 'structure,' 'accuracy,' or 'reliability' — sharing an abstract word is NOT the same as sharing a practical domain.
+  Reject this paragraph entirely if this test fails — do not soften the analogy, do not use hedging language to make it sound less forced. Move to the next candidate paragraph instead.
+  Specific forbidden examples (do not repeat this pattern with any other topic pair):
+  - Font size/readability ↔ LLM hallucinations (via 'avoiding confusion')
+  - JavaScript loading order ↔ LLM hallucinations (via 'sequencing')
+  Both were rejected specifically because font design and JS performance are NOT fields where practitioners deal with AI model accuracy.
+
 DO NOT return failure due to low relevance alone. Only return failure if the ENTIRE domain has absolutely nothing related to technology/AI/software at all (e.g. a cooking or gardening blog) — in ALL other cases, Tier 4 must produce a placement.
 
 ═══════════════════════════════════════
@@ -908,14 +929,18 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], isBr
     // STEP 1: Linkto page analysis -> AI keyword generation (sequential so AI gets context)
     const targetPageInfo = await analyzeLinktoPage(linkto);
     linktoInfo = targetPageInfo;
-    const keywords = await generateKeywordsWithAI(anchor, linkto, linktoInfo, isBranded);
+    const kwResult = await generateKeywordsWithAI(anchor, linkto, linktoInfo, isBranded);
+    const keywords = kwResult.merged;
+    const broaderKeywords = kwResult.broader;
+    
     console.log(`[LINKTO] isToolPage=${linktoInfo.isToolPage}, keywords=${linktoInfo.keywords.slice(0, 5).join(", ")}`);
+    console.log(`[BROADER-CONTEXT] Generated broader keywords: ${broaderKeywords.join(", ")}`);
 
     // Prioritize target-derived keywords over generic anchor words for query building
     const searchKeywords = [...new Set([...(linktoInfo.aiKeywords || []), ...keywords, ...linktoInfo.keywords])];
 
     // STEP 2: Search
-    const searchResult = await searchArticles(domain, anchor, searchKeywords, isBranded);
+    const searchResult = await searchArticles(domain, anchor, searchKeywords, isBranded, broaderKeywords);
     const urls = searchResult.urls;
     const searchTelemetry = searchResult.telemetry;
     if (!urls.length) {
