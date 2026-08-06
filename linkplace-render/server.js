@@ -356,7 +356,7 @@ async function searchArticles(domain, anchor, keywords, isBranded = false, broad
   const broader1 = broaderKeywords[0] || "strategy";
   const broader2 = broaderKeywords[1] || "guide";
   
-  const queries = isBranded ? [
+  const directQueries = isBranded ? [
     `site:${domain} ${keywords.slice(0, 2).join(" ")}`,
     `site:${domain} ${keywords[0] || "software"}`,
     `site:${domain} ${keywords[1] || "tool"}`
@@ -369,33 +369,46 @@ async function searchArticles(domain, anchor, keywords, isBranded = false, broad
     `site:${domain} ${keywords.slice(0, 3).join(" ")}`,
     // Exact anchor phrase LAST — supplementary only
     `site:${domain} "${phrase}"`,
-    // Broader context searches
+  ];
+  
+  const broaderQueries = isBranded ? [] : [
     `site:${domain} ${broader1}`,
     `site:${domain} ${broader2}`,
   ];
-  
-  console.log(`[BROADER-CONTEXT] Search queries used: site:${domain} ${broader1} | site:${domain} ${broader2}`);
 
   const allUrls = new Set();
   const queryTelemetry = [];
 
-  // ✅ PERF FIX: Run ALL queries in PARALLEL (was sequential — caused 2-3 min waits)
-  // Timeout reduced from 18s to 8s. All 4 queries now fire simultaneously.
-  const queryResults = await Promise.allSettled(
-    queries.map(async (query) => {
+  const runQueries = async (queriesToRun) => {
+    for (const query of queriesToRun) {
       console.log(`[SEARCH] Query: ${query}`);
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 6000); // ✅ PERF: SerpAPI is fast, 6s enough
+      const timer = setTimeout(() => controller.abort(), 6000); 
       try {
-        const res = await fetch(
-          `https://serpapi.com/search?${new URLSearchParams({ q: query, api_key: process.env.SERPAPI_KEY, engine: "google", num: "10" })}`,
-          { signal: controller.signal }
-        );
+        const serpApiUrl = `https://serpapi.com/search?${new URLSearchParams({ q: query, api_key: process.env.SERPAPI_KEY, engine: "google", num: "10" })}`;
+        
+        let res = await fetch(serpApiUrl, { signal: controller.signal });
+        
+        // Fix 3: Retry on 429 with backoff
+        if (res.status === 429) {
+          console.log(`[SEARCH] Rate limited (429) on query "${query}", waiting 2s before retry...`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const retryController = new AbortController();
+          const retryTimer = setTimeout(() => retryController.abort(), 6000);
+          try {
+            res = await fetch(serpApiUrl, { signal: retryController.signal });
+          } finally {
+            clearTimeout(retryTimer);
+          }
+        }
+
         clearTimeout(timer);
 
         if (!res.ok) {
           console.log(`[SEARCH] SerpAPI HTTP ${res.status} for: ${query}`);
-          return { query, error: `HTTP ${res.status}`, resultCount: 0 };
+          queryTelemetry.push({ query, error: `HTTP ${res.status}`, resultCount: 0 });
+          await new Promise(resolve => setTimeout(resolve, 300));
+          continue;
         }
 
         const data = await res.json();
@@ -404,11 +417,13 @@ async function searchArticles(domain, anchor, keywords, isBranded = false, broad
           const isZeroResults = /hasn't returned any results|no results found/i.test(data.error);
           if (isZeroResults) {
             console.log(`[SEARCH] Zero results (normal): ${query}`);
-            return { query, rawResultCount: 0, isZeroResults: true };
+            queryTelemetry.push({ query, rawResultCount: 0, isZeroResults: true });
           } else {
             console.log(`[SEARCH] SerpAPI ERROR: ${data.error}`);
-            return { query, error: data.error, resultCount: 0, isZeroResults: false };
+            queryTelemetry.push({ query, error: data.error, resultCount: 0, isZeroResults: false });
           }
+          await new Promise(resolve => setTimeout(resolve, 300));
+          continue;
         }
 
         const rawResults = data?.organic_results || [];
@@ -418,30 +433,36 @@ async function searchArticles(domain, anchor, keywords, isBranded = false, broad
           .map(r => r.link);
 
         console.log(`[SEARCH] "${query}" → ${resultCount} raw, ${validUrls.length} passed filter`);
-        return { query, rawResultCount: resultCount, validUrlCount: validUrls.length, validUrls };
+        queryTelemetry.push({ query, rawResultCount: resultCount, validUrlCount: validUrls.length, validUrls });
+        
+        for (const url of validUrls) allUrls.add(url);
 
       } catch (err) {
         clearTimeout(timer);
         console.log(`[SEARCH] Query failed: ${err.message}`);
-        return { query, error: err.message, resultCount: 0 };
+        queryTelemetry.push({ query, error: err.message, resultCount: 0 });
       }
-    })
-  );
-
-  // Merge results from all parallel queries
-  for (const result of queryResults) {
-    const data = result.status === "fulfilled" ? result.value : { query: "unknown", error: result.reason?.message || "unknown error", resultCount: 0 };
-    queryTelemetry.push(data);
-    if (data.validUrls) {
-      for (const url of data.validUrls) allUrls.add(url);
+      
+      // Fix 1: Add a small delay between SerpAPI calls
+      await new Promise(resolve => setTimeout(resolve, 300));
     }
+  };
+
+  await runQueries(directQueries);
+  
+  // Fix 2: Reduce redundant queries
+  if (allUrls.size < 3 && broaderQueries.length > 0) {
+    console.log(`[SEARCH] Only ${allUrls.size} URLs from direct keywords, trying broader-context queries...`);
+    console.log(`[BROADER-CONTEXT] Search queries used: ${broaderQueries.join(" | ")}`);
+    await runQueries(broaderQueries);
   }
 
   const urls = [...allUrls].slice(0, 6);
   console.log(`[SEARCH] Final URLs (${urls.length}): ${urls.join(", ")}`);
   return { urls, telemetry: queryTelemetry };
-
 }
+
+
 
 // ─── TEMP DIAGNOSTIC: Raw Readability without ANY of our pre-processing ────────
 function debugRawReadability(html, url) {
