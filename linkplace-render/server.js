@@ -179,7 +179,11 @@ async function generateKeywordsWithAI(anchor, linkto, linktoInfo = null, isBrand
         "x-api-key": process.env.ANTHROPIC_API_KEY,
         "anthropic-version": "2023-06-01",
       },
-      signal: A        temperature: 0.2,
+      signal: AbortSignal.timeout(12000),
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 80,
+        temperature: 0.2,
         system: "You are an SEO keyword expert. Return ONLY valid JSON containing two arrays: 'directKeywords' and 'broaderKeywords'. No explanation, no markdown.",
         messages: [{
           role: "user",
@@ -221,10 +225,6 @@ Return ONLY a JSON object with these two arrays.`,
   } catch (err) {
     console.log(`[KEYWORDS] AI failed, falling back to local: ${err.message}`);
     return { merged: extractKeywordsLocal(anchor), broader: [] };
-  }
-}{
-    console.log(`[KEYWORDS] AI failed, falling back to local: ${err.message}`);
-    return extractKeywordsLocal(anchor);
   }
 }
 
