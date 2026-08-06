@@ -835,10 +835,10 @@ Return this exact JSON with two suggestions:
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-    signal: AbortSignal.timeout(25000),
+    signal: AbortSignal.timeout(40000),
     body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1800, // ✅ PERF: reduced from 2500 — 2 placements don't need 2500 tokens
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 2500,
       temperature: 0.1,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],
