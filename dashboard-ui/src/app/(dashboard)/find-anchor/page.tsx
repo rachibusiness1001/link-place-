@@ -22,7 +22,7 @@ export default function FindAnchorPage() {
     setResults(null);
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3000";
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://link-place-latest.onrender.com";
       const res = await fetch(`${backendUrl}/api/find-anchor`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -42,9 +42,9 @@ export default function FindAnchorPage() {
     if (!results || !results.articles || results.articles.length === 0) return;
     
     const headers = ['Domain', 'Article URL', 'Anchor Text'];
-    const rows = results.articles.map((url: string) => [
+    const rows = results.articles.map((item: any) => [
       results.websiteUrl,
-      url,
+      typeof item === 'string' ? item : item.url,
       results.anchorText
     ]);
     
@@ -193,7 +193,9 @@ export default function FindAnchorPage() {
               {/* Article list */}
               {results.articles && results.articles.length > 0 && (
                 <div className="space-y-3">
-                  {results.articles.map((url: string, idx: number) => (
+                  {results.articles.map((item: any, idx: number) => {
+                    const url = typeof item === 'string' ? item : item.url;
+                    return (
                     <motion.div
                       key={idx}
                       initial={{ opacity: 0, y: 6 }}
@@ -220,7 +222,7 @@ export default function FindAnchorPage() {
                         {copiedIdx === idx ? 'Copied!' : 'Copy'}
                       </button>
                     </motion.div>
-                  ))}
+                  )})}
                 </div>
               )}
             </motion.div>
