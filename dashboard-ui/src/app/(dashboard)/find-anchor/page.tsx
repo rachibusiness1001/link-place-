@@ -22,42 +22,15 @@ export default function FindAnchorPage() {
     setResults(null);
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://link-place-latest.onrender.com";
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3000";
       const res = await fetch(`${backendUrl}/api/find-anchor`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ websiteUrl: websiteUrl.trim(), anchorText: anchorText.trim(), urlOffset: 0, limit: 20 })
+        body: JSON.stringify({ websiteUrl: websiteUrl.trim(), anchorText: anchorText.trim() })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to search. Please try again.");
-      setResults(data);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  const handleLoadMore = async () => {
-    if (!results || !results.hasMore) return;
-    setIsSearching(true);
-    setError(null);
-
-    try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://link-place-latest.onrender.com";
-      const res = await fetch(`${backendUrl}/api/find-anchor`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ websiteUrl: websiteUrl.trim(), anchorText: anchorText.trim(), urlOffset: results.nextOffset, limit: 20 })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load more. Please try again.");
-      
-      setResults({
-        ...data,
-        totalFound: results.totalFound + data.totalFound,
-        articles: [...results.articles, ...data.articles]
-      });
+      setResults({ ...data, websiteUrl: websiteUrl.trim(), anchorText: anchorText.trim() });
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -68,17 +41,16 @@ export default function FindAnchorPage() {
   const handleExportCSV = () => {
     if (!results || !results.articles || results.articles.length === 0) return;
     
-    const headers = ['Domain', 'Article URL', 'Anchor Text', 'Context'];
-    const rows = results.articles.map((res: any) => [
+    const headers = ['Domain', 'Article URL', 'Anchor Text'];
+    const rows = results.articles.map((url: string) => [
       results.websiteUrl,
-      res.url,
-      results.anchorText,
-      `"${res.context.replace(/"/g, '""')}"`
+      url,
+      results.anchorText
     ]);
     
     const csvContent = [
       headers.join(','),
-      ...rows.map(row => row.join(','))
+      ...rows.map((row: any) => row.join(','))
     ].join('\n');
     
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -130,7 +102,7 @@ export default function FindAnchorPage() {
               value={websiteUrl}
               onChange={(e) => setWebsiteUrl(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              placeholder="e.g. buildd.co or https://buildd.co"
+              placeholder="e.g. ipwithease.com"
               className="w-full bg-[#0a0a0a] border border-white/5 rounded-lg py-2.5 pl-10 pr-4 text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-white/10 focus:ring-1 focus:ring-white/10 transition-all"
             />
           </div>
@@ -147,7 +119,7 @@ export default function FindAnchorPage() {
               value={anchorText}
               onChange={(e) => setAnchorText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              placeholder="e.g. ai engineering course"
+              placeholder="e.g. AI tool"
               className="w-full bg-[#0a0a0a] border border-white/5 rounded-lg py-2.5 pl-10 pr-4 text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-white/10 focus:ring-1 focus:ring-white/10 transition-all"
             />
           </div>
@@ -171,12 +143,12 @@ export default function FindAnchorPage() {
           {isSearching ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              Scanning articles... (this may take 30–60 seconds)
+              Scanning articles... (Fast Scan Mode)
             </>
           ) : (
             <>
               <Search className="w-4 h-4" />
-              Find All Mentions
+              Find Mentions
             </>
           )}
         </button>
@@ -194,12 +166,12 @@ export default function FindAnchorPage() {
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-5 h-5 text-[#00df81]" />
                   <span className="text-white font-semibold">
-                    {results.totalFound === 0
+                    {results.articles.length === 0
                       ? `No articles found with "${results.anchorText}"`
-                      : `Found ${results.totalFound} article${results.totalFound > 1 ? 's' : ''} mentioning "${results.anchorText}"`}
+                      : `Found ${results.articles.length} article${results.articles.length > 1 ? 's' : ''} mentioning "${results.anchorText}"`}
                   </span>
                 </div>
-                {results.totalFound > 0 && (
+                {results.articles.length > 0 && (
                   <button
                     onClick={handleExportCSV}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white text-xs font-medium transition-all"
@@ -210,7 +182,7 @@ export default function FindAnchorPage() {
                 )}
               </div>
 
-              {results.totalFound === 0 && (
+              {results.articles.length === 0 && (
                 <div className="text-center py-8 text-zinc-600 text-sm">
                   <LinkIcon className="w-8 h-8 mx-auto mb-3 opacity-30" />
                   <p>No articles on <span className="text-zinc-400">{results.websiteUrl}</span> mention "<span className="text-zinc-400">{results.anchorText}</span>".</p>
@@ -221,65 +193,34 @@ export default function FindAnchorPage() {
               {/* Article list */}
               {results.articles && results.articles.length > 0 && (
                 <div className="space-y-3">
-                  {results.articles.map((article: any, idx: number) => (
+                  {results.articles.map((url: string, idx: number) => (
                     <motion.div
                       key={idx}
                       initial={{ opacity: 0, y: 6 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: idx * 0.05 }}
-                      className="bg-[#0a0a0a] border border-white/5 rounded-xl p-4 hover:border-white/10 transition-colors"
+                      className="bg-[#0a0a0a] border border-white/5 rounded-xl p-4 hover:border-white/10 transition-colors flex items-center justify-between gap-3"
                     >
-                      {/* Article title + URL */}
-                      <div className="flex items-start justify-between gap-3 mb-3">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-white text-sm font-medium truncate">{article.title}</p>
-                          <a
-                            href={article.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[#6366f1] text-xs font-mono hover:underline break-all flex items-center gap-1 mt-0.5"
-                          >
-                            {article.url}
-                            <ExternalLink className="w-3 h-3 shrink-0" />
-                          </a>
-                        </div>
-                        <button
-                          onClick={() => handleCopy(article.url, idx)}
-                          className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white text-xs font-medium transition-all"
+                      <div className="min-w-0 flex-1">
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[#6366f1] text-sm font-mono hover:underline break-all flex items-center gap-1"
                         >
-                          <Copy className="w-3 h-3" />
-                          {copiedIdx === idx ? 'Copied!' : 'Copy URL'}
-                        </button>
+                          {url}
+                          <ExternalLink className="w-3 h-3 shrink-0" />
+                        </a>
                       </div>
-
-                      {/* Context snippet with anchor highlighted */}
-                      {article.context && (
-                        <div className="bg-[#121212] border border-white/5 rounded-lg px-3 py-2">
-                          <p className="text-zinc-500 text-xs leading-relaxed font-mono">
-                            {article.context.split(new RegExp(`(${anchorText})`, 'gi')).map((part: string, i: number) =>
-                              part.toLowerCase() === anchorText.toLowerCase()
-                                ? <mark key={i} className="bg-[#6366f1]/30 text-[#a5b4fc] rounded px-0.5 not-italic">{part}</mark>
-                                : <span key={i}>{part}</span>
-                            )}
-                          </p>
-                        </div>
-                      )}
+                      <button
+                        onClick={() => handleCopy(url, idx)}
+                        className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white text-xs font-medium transition-all"
+                      >
+                        <Copy className="w-3 h-3" />
+                        {copiedIdx === idx ? 'Copied!' : 'Copy'}
+                      </button>
                     </motion.div>
                   ))}
-                </div>
-              )}
-
-              {/* Load More Button */}
-              {results.hasMore && (
-                <div className="pt-4 flex justify-center">
-                  <button
-                    onClick={handleLoadMore}
-                    disabled={isSearching}
-                    className="px-6 py-2.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white text-sm font-medium transition-all flex items-center gap-2 disabled:opacity-50"
-                  >
-                    {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                    Find 20 More
-                  </button>
                 </div>
               )}
             </motion.div>
@@ -292,10 +233,10 @@ export default function FindAnchorPage() {
         <h3 className="text-white text-sm font-semibold mb-2">How it works</h3>
         <div className="space-y-2 text-xs text-zinc-500">
           {[
-            "We scan the website's sitemap.xml or RSS feed to find all article URLs",
-            "Each article is fetched and checked for the anchor text you provided",
-            "All matching pages are returned with a preview snippet",
-            "No external APIs used — completely free, unlimited"
+            "We scan the website's sitemap.xml or RSS feed to find article URLs",
+            "Each article is fetched and checked for the exact anchor text",
+            "Returns a simple list of matching URLs for you to review",
+            "Hostinger-safe and optimized for speed."
           ].map((step, i) => (
             <div key={i} className="flex items-start gap-2">
               <ChevronRight className="w-3 h-3 text-[#6366f1] mt-0.5 shrink-0" />
