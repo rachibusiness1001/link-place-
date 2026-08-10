@@ -22,7 +22,7 @@ export default function FindAnchorPage() {
     setResults(null);
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://link-place-latest.onrender.com";
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://link-place.onrender.com";
       const res = await fetch(`${backendUrl}/api/find-anchor`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
