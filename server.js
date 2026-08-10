@@ -27,10 +27,7 @@ const anchorHuntRoute = require('./src/routes/anchorHunt');
 app.use('/', anchorHuntRoute);
 
 const placementNormalRoute = require('./src/routes/placementNormal');
-app.use('/api/analyze-normal', placementNormalRoute);
-
 const placementBrandedRoute = require('./src/routes/placementBranded');
-app.use('/api/analyze-branded', placementBrandedRoute);
 
 const limiter = rateLimit({
   windowMs: 60 * 1000,
@@ -271,7 +268,10 @@ Return ONLY a valid JSON array of exactly 5 strings, nothing else — no markdow
   return [];
 }
 
-// --- /api/analyze endpoints have been moved to src/routes/placementNormal and src/routes/placementBranded ---
+// Mount route files AND keep /api/analyze as backward-compatible alias
+app.use('/api/analyze-normal', placementNormalRoute);
+app.use('/api/analyze-branded', placementBrandedRoute);
+app.use('/api/analyze', placementNormalRoute);
 
 app.post("/api/variations", async (req, res) => {
   const { anchor } = req.body;

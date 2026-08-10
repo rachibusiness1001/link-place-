@@ -80,7 +80,7 @@ export default function BrandedAnchorPage() {
 
     try {
       const backendUrl = "https://link-place.onrender.com";
-      const res = await fetch(`${backendUrl}/api/analyze-branded`, {
+      const res = await fetch(`${backendUrl}/api/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ domain, anchor, linkto, altAnchor, anchors: anchorsToTry, isBranded: true })
