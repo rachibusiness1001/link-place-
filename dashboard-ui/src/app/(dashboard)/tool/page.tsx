@@ -71,7 +71,7 @@ export default function ToolPage() {
     setIsGeneratingVariations(true);
     setVariations([]);
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://link-place.onrender.com";
+      const backendUrl = "https://link-place.onrender.com";
       const res = await fetch(`${backendUrl}/api/generate-anchor-variations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -106,7 +106,7 @@ export default function ToolPage() {
     }
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://link-place.onrender.com";
+      const backendUrl = "https://link-place.onrender.com";
       const res = await fetch(`${backendUrl}/api/analyze-normal`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
