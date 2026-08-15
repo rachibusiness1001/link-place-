@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link as LinkIcon, FileText, Anchor, Sparkles, Globe, CheckCircle2, Circle, AlertCircle, Download, BookMarked, Plus, FolderOpen } from 'lucide-react';
+import { Link as LinkIcon, FileText, Anchor, Sparkles, Globe, CheckCircle2, Circle, AlertCircle, Download, BookMarked, Plus, FolderOpen, RefreshCw } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 
 const LOADING_STEPS = [
@@ -37,6 +37,9 @@ export default function ToolPage() {
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [savedIds, setSavedIds] = useState<Set<number>>(new Set());
+  const [excludedParagraphs, setExcludedParagraphs] = useState<string[]>([]);
+  const [excludedArticleUrls, setExcludedArticleUrls] = useState<string[]>([]);
+  const [isFindingMore, setIsFindingMore] = useState(false);
 
   const handleCreateProject = () => {
     if (!newProjectName.trim()) return;
@@ -110,7 +113,7 @@ export default function ToolPage() {
       const res = await fetch(`${backendUrl}/api/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ domain, anchor, linkto, altAnchor, anchors: anchorsToTry, isBranded: false })
+        body: JSON.stringify({ domain, anchor, linkto, altAnchor, anchors: anchorsToTry, isBranded: false, excludedParagraphs, excludedArticleUrls })
       });
       
       const data = await res.json();
@@ -126,6 +129,59 @@ export default function ToolPage() {
       clearInterval(stepInterval);
       setLoadingStep(LOADING_STEPS.length);
       setIsSearching(false);
+      setIsFindingMore(false);
+    }
+  };
+
+  const handleFindMore = async () => {
+    if (!results) return;
+    // Collect IDs and URLs of current results to exclude them
+    const newExcludedIds = results.map((r: any) => r.id).filter(Boolean);
+    const newExcludedUrls = results.map((r: any) => r.article_url).filter(Boolean);
+    setExcludedParagraphs(prev => [...prev, ...newExcludedIds]);
+    setExcludedArticleUrls(prev => [...prev, ...newExcludedUrls]);
+    
+    setIsFindingMore(true);
+    setIsSearching(true);
+    setError(null);
+    setResults(null);
+    setLoadingStep(0);
+
+    const stepInterval = setInterval(() => {
+      setLoadingStep((prev) => Math.min(prev + 1, LOADING_STEPS.length - 1));
+    }, 5000);
+
+    const anchorsToTry = [anchor, ...Array.from(selectedVariations)];
+    if (anchorsToTry.length === 1 && altAnchor) {
+      anchorsToTry.push(altAnchor);
+    }
+
+    try {
+      const backendUrl = "https://link-place.onrender.com";
+      const res = await fetch(`${backendUrl}/api/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          domain, anchor, linkto, altAnchor, anchors: anchorsToTry, isBranded: false,
+          excludedParagraphs: [...excludedParagraphs, ...newExcludedIds],
+          excludedArticleUrls: [...excludedArticleUrls, ...newExcludedUrls]
+        })
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw data;
+      }
+      
+      setResults(data.suggestions || []);
+    } catch (err: any) {
+      setError(err);
+    } finally {
+      clearInterval(stepInterval);
+      setLoadingStep(LOADING_STEPS.length);
+      setIsSearching(false);
+      setIsFindingMore(false);
     }
   };
 
@@ -571,13 +627,21 @@ export default function ToolPage() {
                     );
                   })}
 
-                  <div className="pt-2">
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      onClick={handleFindMore}
+                      disabled={isSearching}
+                      className="flex-1 py-2.5 rounded-lg bg-[#0a0a0a] border border-violet-500/20 hover:border-violet-500/40 hover:bg-violet-500/5 text-violet-400 font-medium text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${isFindingMore ? 'animate-spin' : ''}`} />
+                      Find More Suggestions
+                    </button>
                     <button
                       onClick={handleExportCSV}
-                      className="w-full py-2.5 rounded-lg bg-[#0a0a0a] border border-white/10 hover:border-white/20 hover:bg-white/5 text-zinc-300 font-medium text-sm flex items-center justify-center gap-2 transition-all"
+                      className="flex-1 py-2.5 rounded-lg bg-[#0a0a0a] border border-white/10 hover:border-white/20 hover:bg-white/5 text-zinc-300 font-medium text-sm flex items-center justify-center gap-2 transition-all"
                     >
                       <Download className="w-4 h-4" />
-                      Export Placements as CSV
+                      Export as CSV
                     </button>
                   </div>
                 </div>

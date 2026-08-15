@@ -97,9 +97,10 @@ function mentionstool(text) {
   const toolPatterns = [
     /\b(using|use|with|via|through|powered by|built (on|with)|integrate[sd]? with)\b.{0,40}\b(tool|software|platform|app|service|api)\b/i,
     /\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s(?:tool|software|platform|app)\b/,
-    /\b(monday\.com|hubspot|salesforce|zapier|ahrefs|semrush|moz|screaming frog|google analytics|mixpanel|amplitude)\b/i,
+    /\b(monday\.com|hubspot|salesforce|zapier|ahrefs|semrush|moz|screaming frog|google analytics|mixpanel|amplitude|sparktoro|mailchimp|hootsuite|buffer|canva|trello|asana|slack|notion|clickup|intercom|zendesk|freshdesk|pipedrive|zoho)\b/i,
+    /\b[A-Z][a-z]{2,}(?:[A-Z][a-z]+)+\b/,  // CamelCase tool names like SparkToro, HubSpot
   ];
-  return toolPatterns.filter((re) => re.test(text)).length >= 2;
+  return toolPatterns.filter((re) => re.test(text)).length >= 1;
 }
 
 function isQualityParagraph(text, linkCount, isToolTarget = false, domain = "unknown", currentUrl = "unknown") {
@@ -245,7 +246,9 @@ Respond ONLY with valid JSON. No markdown, no backticks, no explanation outside 
   const userPrompt = `Anchor text to place: "${anchor}"
 ${linktoBrief}
 
-Analyze the paragraphs below. Pick the TWO best paragraphs where the anchor link can be placed organically (preferring different articles when possible).
+Analyze the paragraphs below. Pick the TWO best paragraphs where the anchor link can be placed organically.
+
+CRITICAL RULE — ARTICLE DIVERSITY: The two suggestions MUST come from DIFFERENT article URLs. Never pick two paragraphs from the same article. If only one article has good paragraphs, return only ONE suggestion.
 
 ═══════════════════════════════════════
 STAGE C — TIERED SELECTION LADDER
@@ -264,7 +267,7 @@ STAGE D — PLACEMENT & EDITING RULES (CRITICAL)
 4. VALIDATION CHECK: The bridging sentence must NOT introduce any concept that isn't already implied.
 5. ABSOLUTE NON-IRRELEVANCE RULE: Do not place a link where the paragraph's broad subject domain has NO reasonable relation at all to the target URL.
 6. JUSTIFICATION FIELD (always required in "reason"): One sentence explaining the connection.
-7. Prefer suggestions from DIFFERENT articles when at least two articles have genuinely strong matches.
+7. MANDATORY: Each suggestion MUST come from a DIFFERENT article URL. If you pick two paragraphs from the same article, your response is INVALID.
 
 Paragraphs:
 ${paragraphText}
@@ -452,7 +455,17 @@ async function runAnalysis(domain, anchor, linkto, excludedParagraphs = [], excl
       natural_fit: aiResult.relevance_score >= 80 ? "high" : aiResult.relevance_score >= 55 ? "medium" : "low",
     };
   });
-  return results;
+
+  // Post-process: enforce article diversity — deduplicate by article_url
+  const seenUrls = new Set();
+  const dedupedResults = [];
+  for (const r of results) {
+    if (!seenUrls.has(r.article_url)) {
+      seenUrls.add(r.article_url);
+      dedupedResults.push(r);
+    }
+  }
+  return dedupedResults;
 }
 
 async function runAnalysisWithFallback(domain, anchorList, linkto, excludedParagraphs, excludedArticleUrls) {
