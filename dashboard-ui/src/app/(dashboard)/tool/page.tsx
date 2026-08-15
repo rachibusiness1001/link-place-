@@ -122,7 +122,15 @@ export default function ToolPage() {
         throw data;
       }
       
-      setResults(data.suggestions || []);
+      // Deduplicate: keep only one suggestion per article URL
+      const rawSuggestions = data.suggestions || [];
+      const seenUrls = new Set<string>();
+      const uniqueSuggestions = rawSuggestions.filter((s: any) => {
+        if (seenUrls.has(s.article_url)) return false;
+        seenUrls.add(s.article_url);
+        return true;
+      });
+      setResults(uniqueSuggestions);
     } catch (err: any) {
       setError(err);
     } finally {
@@ -174,7 +182,15 @@ export default function ToolPage() {
         throw data;
       }
       
-      setResults(data.suggestions || []);
+      // Deduplicate: keep only one suggestion per article URL
+      const rawSuggestions = data.suggestions || [];
+      const seenUrls = new Set<string>();
+      const uniqueSuggestions = rawSuggestions.filter((s: any) => {
+        if (seenUrls.has(s.article_url)) return false;
+        seenUrls.add(s.article_url);
+        return true;
+      });
+      setResults(uniqueSuggestions);
     } catch (err: any) {
       setError(err);
     } finally {
