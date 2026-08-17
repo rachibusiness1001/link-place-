@@ -32,7 +32,7 @@ export default function ToolPage() {
   const [selectedVariations, setSelectedVariations] = useState<Set<string>>(new Set());
 
   // Project management
-  const { projects, addProject, savePlacement } = useAppStore();
+  const { projects, addProject, savePlacement, user } = useAppStore();
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
@@ -74,8 +74,8 @@ export default function ToolPage() {
     setIsGeneratingVariations(true);
     setVariations([]);
     try {
-      const backendUrl = "https://link-place.onrender.com";
-      const res = await fetch(`${backendUrl}/api/generate-anchor-variations`, {
+      
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/generate-anchor-variations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ anchor })
@@ -109,10 +109,13 @@ export default function ToolPage() {
     }
 
     try {
-      const backendUrl = "https://link-place.onrender.com";
-      const res = await fetch(`${backendUrl}/api/analyze`, {
+      
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/analyze`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(user?.token ? { Authorization: `Bearer ${user.token}` } : {})
+        },
         body: JSON.stringify({ domain, anchor, linkto, altAnchor, anchors: anchorsToTry, isBranded: false, excludedParagraphs, excludedArticleUrls })
       });
       
@@ -120,6 +123,11 @@ export default function ToolPage() {
       
       if (!res.ok) {
         throw data;
+      }
+      
+      // Decrease local tokens if successful search
+      if (user) {
+        useAppStore.getState().setUser({ ...user, tokens: Math.max(0, user.tokens - 1) });
       }
       
       // Deduplicate: keep only one suggestion per article URL
@@ -165,10 +173,13 @@ export default function ToolPage() {
     }
 
     try {
-      const backendUrl = "https://link-place.onrender.com";
-      const res = await fetch(`${backendUrl}/api/analyze`, {
+      
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/analyze`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(user?.token ? { Authorization: `Bearer ${user.token}` } : {})
+        },
         body: JSON.stringify({
           domain, anchor, linkto, altAnchor, anchors: anchorsToTry, isBranded: false,
           excludedParagraphs: [...excludedParagraphs, ...newExcludedIds],
@@ -180,6 +191,11 @@ export default function ToolPage() {
       
       if (!res.ok) {
         throw data;
+      }
+      
+      // Decrease local tokens if successful search
+      if (user) {
+        useAppStore.getState().setUser({ ...user, tokens: Math.max(0, user.tokens - 1) });
       }
       
       // Deduplicate: keep only one suggestion per article URL

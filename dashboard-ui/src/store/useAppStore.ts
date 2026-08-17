@@ -1,4 +1,4 @@
-﻿import { create } from "zustand";
+import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export interface Placement {
@@ -22,7 +22,17 @@ export interface Project {
   createdAt: string;
 }
 
+interface User {
+  uid: string;
+  email: string | null;
+  role?: string;
+  token?: string;
+}
+
 interface AppState {
+  user: User | null;
+  setUser: (user: User | null) => void;
+  logout: () => void;
   activePlan: string;
   setActivePlan: (plan: string) => void;
   stats: {
@@ -47,6 +57,9 @@ interface AppState {
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
+      user: null,
+      setUser: (user) => set({ user }),
+      logout: () => set({ user: null }),
       activePlan: "Starter",
       setActivePlan: (plan) => set({ activePlan: plan }),
       stats: {

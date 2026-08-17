@@ -29,7 +29,7 @@ export default function BrandedAnchorPage() {
 
 
   // Project management
-  const { projects, addProject, savePlacement } = useAppStore();
+  const { projects, addProject, savePlacement, user } = useAppStore();
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
@@ -79,10 +79,13 @@ export default function BrandedAnchorPage() {
     }
 
     try {
-      const backendUrl = "https://link-place.onrender.com";
-      const res = await fetch(`${backendUrl}/api/analyze`, {
+      
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/analyze`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(user?.token ? { Authorization: `Bearer ${user.token}` } : {})
+        },
         body: JSON.stringify({ domain, anchor, linkto, altAnchor, anchors: anchorsToTry, isBranded: true })
       });
 
@@ -90,6 +93,11 @@ export default function BrandedAnchorPage() {
 
       if (!res.ok) {
         throw data;
+      }
+
+      // Decrease local tokens if successful search
+      if (user) {
+        useAppStore.getState().setUser({ ...user, tokens: Math.max(0, user.tokens - 1) });
       }
 
       setResults(data.suggestions || []);

@@ -2,8 +2,10 @@
  * LinkPlace v3 — AI Keyword Generation + Better Search
  */
 "use strict";
+require("dotenv").config();
 const express = require("express");
 const path = require("path");
+const connectDB = require("./src/db/connect");
 const { JSDOM } = require("jsdom");
 const { Readability } = require("@mozilla/readability");
 const NodeCache = require("node-cache");
@@ -22,6 +24,9 @@ app.set("trust proxy", 1);
 app.use(cors()); // Allow all origins since frontend is on Vercel
 app.use(express.json({ limit: "50kb" }));
 app.use(express.static(path.join(__dirname, "public")));
+
+// Connect to MongoDB
+connectDB();
 
 const anchorHuntRoute = require('./src/routes/anchorHunt');
 app.use('/', anchorHuntRoute);
@@ -268,10 +273,22 @@ Return ONLY a valid JSON array of exactly 5 strings, nothing else — no markdow
   return [];
 }
 
+const { requireAuth, requireAdmin } = require('./src/middleware/auth');
+
 // Mount route files AND keep /api/analyze as backward-compatible alias
-app.use('/api/analyze-normal', placementNormalRoute);
-app.use('/api/analyze-branded', placementBrandedRoute);
-app.use('/api/analyze', placementNormalRoute);
+app.use('/api/analyze-normal', requireAuth, placementNormalRoute);
+app.use('/api/analyze-branded', requireAuth, placementBrandedRoute);
+app.use('/api/analyze', requireAuth, placementNormalRoute);
+
+// Admin & Auth routes
+app.use('/api/auth', require('./src/routes/auth'));
+app.use('/api/credits', requireAuth, require('./src/routes/credits'));
+app.use('/api/admin', requireAuth, requireAdmin, require('./src/routes/admin'));
+
+// Ping route to keep Render instance awake
+app.get('/api/ping', (req, res) => {
+  res.status(200).send('pong');
+});
 
 app.post("/api/variations", async (req, res) => {
   const { anchor } = req.body;

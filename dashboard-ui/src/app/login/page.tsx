@@ -10,21 +10,60 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
 import { useRouter } from "next/navigation"
+import { signInWithPopup } from "firebase/auth"
+import { auth, googleProvider } from "@/lib/firebase"
+import { useAppStore } from "@/store/useAppStore"
+import axios from "axios"
 
 export default function LoginPage() {
   const router = useRouter()
+  const { setUser } = useAppStore()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    // Normal email login logic can go here later if needed
+    console.log("Email login not fully implemented yet.")
+  }
+
+  const handleGoogleLogin = async () => {
     setIsLoading(true)
-    // Simulate login process
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    setIsLoading(false)
-    console.log("[v0] Login attempt:", { email, password })
-    router.push("/dashboard")
+    try {
+      const result = await signInWithPopup(auth, googleProvider)
+      const user = result.user
+      const token = await user.getIdToken()
+      
+      // Sync with our backend to create/update user in MongoDB
+      const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/sync`, {}, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      })
+
+      const { role } = res.data.user
+
+      // Save to global store
+      setUser({
+        uid: user.uid,
+        email: user.email,
+        role: role,
+        token: token
+      })
+
+      // Redirect based on role
+      if (role === "admin") {
+        router.push("/admin")
+      } else {
+        router.push("/dashboard")
+      }
+    } catch (error) {
+      console.error("Login failed:", error)
+      alert("Failed to login with Google. Please try again.")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -155,6 +194,8 @@ export default function LoginPage() {
           <div className="mt-6 grid grid-cols-1 gap-4">
             <Button
               type="button"
+              onClick={handleGoogleLogin}
+              disabled={isLoading}
               variant="outline"
               className="relative overflow-hidden group bg-zinc-900/80 border border-zinc-700 text-white hover:text-white transition-all duration-200 h-12 rounded-xl shadow-[0_4px_0_rgb(63,63,70)] hover:-translate-y-0.5 hover:shadow-[0_6px_0_rgb(63,63,70),0_0_15px_rgba(255,255,255,0.1)] active:translate-y-[4px] active:shadow-none"
             >

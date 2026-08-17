@@ -22,8 +22,8 @@ export default function FindAnchorPage() {
     setResults(null);
 
     try {
-      const backendUrl = "https://link-place.onrender.com";
-      const res = await fetch(`${backendUrl}/api/find-anchor`, {
+      
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/find-anchor`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ websiteUrl: websiteUrl.trim(), anchorText: anchorText.trim() })

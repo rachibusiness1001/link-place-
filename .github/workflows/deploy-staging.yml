@@ -1,0 +1,36 @@
+name: Deploy Staging to Hostinger
+
+on:
+  push:
+    branches:
+      - staging
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Frontend Dependencies
+        working-directory: ./dashboard-ui
+        run: npm ci
+
+      - name: Build Next.js Frontend
+        working-directory: ./dashboard-ui
+        env:
+          NEXT_PUBLIC_API_URL: https://api-staging.mylinkplace.com
+        run: npm run build
+
+      - name: Deploy Frontend via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME_FRONTEND_STAGING }}
+          password: ${{ secrets.FTP_PASSWORD_FRONTEND_STAGING }}
+          local-dir: ./dashboard-ui/out/
