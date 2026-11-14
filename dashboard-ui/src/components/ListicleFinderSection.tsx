@@ -104,22 +104,38 @@ export default function ListicleFinderSection({ standalone = false }: { standalo
     }, 2800);
 
     try {
-      const defaultBackend =
+      const isLocal =
         typeof window !== "undefined" &&
-        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-          ? "http://localhost:3000"
-          : "https://link-place.onrender.com";
+        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+
+      const defaultBackend = isLocal
+        ? "http://localhost:3000"
+        : "https://link-place.onrender.com";
 
       const apiBase =
         process.env.NEXT_PUBLIC_API_URL ||
         process.env.NEXT_PUBLIC_BACKEND_URL ||
         defaultBackend;
 
-      const res = await fetch(`${apiBase}/api/listicle-finder`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ websiteUrl: check.normalized }),
-      });
+      let res: Response | null = null;
+      try {
+        res = await fetch(`${apiBase}/api/listicle-finder`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ websiteUrl: check.normalized }),
+        });
+      } catch {
+        res = null;
+      }
+
+      // Automatic fallback to built-in Next.js API route (/api/listicle-finder) if external backend is asleep or not yet deployed
+      if (!res || res.status === 404 || res.status === 502 || res.status === 503) {
+        res = await fetch(`/api/listicle-finder`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ websiteUrl: check.normalized }),
+        });
+      }
 
       const data = await res.json();
       if (!res.ok) {

@@ -1492,6 +1492,12 @@ app.post("/api/analyze", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+try {
+  const listicleFinderRouter = require("../src/routes/listicleFinder");
+  app.use("/api/listicle-finder", listicleFinderRouter);
+} catch (err) {
+  console.warn("[ListicleFinder] Optional route not mounted in linkplace-render:", err.message);
+}
 app.listen(PORT, () => console.log(`LinkPlace v3 running on port ${PORT}`));
 
 module.exports = { app, runAnalysis, searchArticles, scrapeAndScore, generateAnchorVariations, analyzeLinktoPage, runAnalysisWithFallback };
