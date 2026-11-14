@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link as LinkIcon, FileText, Anchor, Sparkles, Globe, CheckCircle2, Circle, AlertCircle, Download, BookMarked, Plus, FolderOpen, RefreshCw } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
-import ListicleFinderSection from '@/components/ListicleFinderSection';
 
 const LOADING_STEPS = [
   "Generating semantic keywords...",
@@ -744,9 +743,6 @@ export default function ToolPage() {
           </div>
         )}
       </AnimatePresence>
-
-      {/* Listicle Finder Section directly below Placement Finder */}
-      <ListicleFinderSection />
     </motion.div>
   );
 }
