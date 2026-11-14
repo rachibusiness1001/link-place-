@@ -470,6 +470,141 @@
   .chip .badge { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(0,0,0,0.2); color: inherit; font-size: 11px; font-weight: 700; }
   .chip .reorder-btn { display: inline-flex; align-items: center; justify-content: center; padding: 2px 5px; border-radius: 4px; font-size: 11px; color: inherit; opacity: 0.8; background: rgba(0,0,0,0.15); border: none; cursor: pointer; }
   .chip .reorder-btn:hover { opacity: 1; background: rgba(0,0,0,0.3); }
+
+  /* Listicle Finder Section Styles */
+  .section-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 48px 0 36px;
+  }
+  .listicle-header {
+    margin-bottom: 20px;
+  }
+  .listicle-header h2 {
+    font-family: 'Syne', sans-serif;
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-bottom: 6px;
+  }
+  .listicle-header p {
+    font-size: 14px;
+    color: var(--text2);
+    line-height: 1.6;
+  }
+  .listicle-notice {
+    background: rgba(251,191,36,0.08);
+    border: 1px solid rgba(251,191,36,0.28);
+    border-radius: var(--radius-sm);
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--amber);
+    margin-bottom: 16px;
+    line-height: 1.5;
+    display: none;
+  }
+  .listicle-notice.show { display: block; }
+  .listicle-empty {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 32px 20px;
+    text-align: center;
+    color: var(--text2);
+    font-size: 13px;
+    margin-top: 16px;
+  }
+  .listicle-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .listicle-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .btn-action-sm {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 7px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-hover);
+    background: var(--surface2);
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-action-sm:hover { border-color: var(--accent); background: rgba(124,109,250,0.1); }
+  .btn-action-sm.csv { border-color: rgba(74,222,128,0.3); color: var(--green); background: rgba(74,222,128,0.08); }
+  .btn-action-sm.csv:hover { background: rgba(74,222,128,0.16); }
+  .listicle-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface2);
+  }
+  .listicle-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 13px;
+  }
+  .listicle-table th {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text3);
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(0,0,0,0.2);
+    white-space: nowrap;
+  }
+  .listicle-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+    color: var(--text);
+  }
+  .listicle-table tr:last-child td { border-bottom: none; }
+  .listicle-table tr:hover td { background: rgba(255,255,255,0.02); }
+  .listicle-url-link {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    text-decoration: none;
+    word-break: break-all;
+  }
+  .listicle-url-link:hover { text-decoration: underline; }
+  .type-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 6px;
+    background: rgba(124,109,250,0.12);
+    border: 1px solid rgba(124,109,250,0.25);
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .conf-badge {
+    display: inline-block;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+  .conf-high { background: rgba(74,222,128,0.1); color: var(--green); border: 1px solid rgba(74,222,128,0.25); }
+  .conf-medium { background: rgba(251,191,36,0.1); color: var(--amber); border: 1px solid rgba(251,191,36,0.25); }
 </style>
 </head>
 <body>
@@ -748,6 +883,94 @@
     </div>
 
   </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       LISTICLE FINDER SECTION (Directly below Placement Finder)
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <div class="section-divider"></div>
+
+  <section id="listicle-finder-section">
+    <div class="listicle-header">
+      <div class="result-tag">Outreach Tool</div>
+      <h2>Listicle Finder</h2>
+      <p>Enter any website URL to find listicle-style articles (&ldquo;10 Best Tools for X&rdquo;, &ldquo;7 Ways to Do Y&rdquo;, &ldquo;Top 15 Alternatives&rdquo;) to pitch your link or product for inclusion.</p>
+    </div>
+
+    <div class="form-card">
+      <div class="field">
+        <label for="listicle-url">Website URL</label>
+        <div class="input-wrap">
+          <span class="input-icon">🌐</span>
+          <input
+            type="text"
+            id="listicle-url"
+            placeholder="https://example.com"
+            autocomplete="off"
+            onblur="normalizeListicleInputBox()"
+          />
+        </div>
+        <div class="field-hint">Automatically adds https:// and removes trailing slashes</div>
+      </div>
+
+      <button class="btn-primary" id="find-listicles-btn" onclick="findListicles()">
+        Find Listicles ↗
+      </button>
+
+      <div class="error-box" id="listicle-error-box"></div>
+
+      <!-- Loading Progress inside Listicle Finder -->
+      <div class="loading-card" id="listicle-loading-card" style="margin-top:18px; margin-bottom:0; padding:20px;">
+        <ul class="loading-steps">
+          <li id="lf-step-1"><span class="step-dot"></span> Scanning sitemap.xml, sitemap_index.xml &amp; robots.txt...</li>
+          <li id="lf-step-2"><span class="step-dot"></span> Filtering candidate URLs with listicle regex patterns...</li>
+          <li id="lf-step-3"><span class="step-dot"></span> Analyzing doubtful articles with DeepSeek AI...</li>
+          <li id="lf-step-4"><span class="step-dot"></span> Preparing confirmed listicle results...</li>
+        </ul>
+      </div>
+
+      <!-- Initial Empty State -->
+      <div class="listicle-empty" id="listicle-empty-state">
+        <div style="font-size:22px; margin-bottom:8px;">📋</div>
+        <div style="color:var(--text); font-weight:600; margin-bottom:4px;">Ready to scan for listicle articles</div>
+        <div id="listicle-empty-text">Enter a website URL above and click &ldquo;Find Listicles&rdquo; to discover listicle articles on that site.</div>
+      </div>
+
+      <!-- Results Container -->
+      <div id="listicle-results-wrap" style="display:none; margin-top:22px;">
+        <div class="listicle-notice" id="listicle-fewer-notice"></div>
+
+        <div class="listicle-toolbar">
+          <div style="font-size:14px; font-weight:600; color:var(--text);" id="listicle-count-label">
+            Found 0 Listicles
+          </div>
+          <div class="listicle-actions">
+            <button type="button" class="btn-action-sm" id="copy-all-listicles-btn" onclick="copyAllListicleUrls()">
+              📋 Copy all
+            </button>
+            <button type="button" class="btn-action-sm csv" onclick="exportListiclesCSV()">
+              ⬇ Export CSV
+            </button>
+          </div>
+        </div>
+
+        <div class="listicle-table-wrap">
+          <table class="listicle-table">
+            <thead>
+              <tr>
+                <th style="width:46px;">No.</th>
+                <th>Article Title</th>
+                <th>URL</th>
+                <th>Listicle Type</th>
+                <th>Confidence</th>
+                <th style="text-align:right;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="listicle-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
 
   <footer>LinkPlace &mdash; AI-powered link insertion tool &mdash; v2.0</footer>
 </div>
@@ -1163,8 +1386,216 @@ function exportToCSV() {
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !document.getElementById('analyze-btn').disabled) analyze();
+  if (e.key === 'Enter') {
+    if (document.activeElement && document.activeElement.id === 'listicle-url') {
+      const lfBtn = document.getElementById('find-listicles-btn');
+      if (lfBtn && !lfBtn.disabled) findListicles();
+      return;
+    }
+    if (!document.getElementById('analyze-btn').disabled) analyze();
+  }
 });
+
+// ─── Listicle Finder Frontend Logic ────────────────────────────────────────────
+let _listicleStepTimer = null;
+let _lastListicleScan = null;
+
+function normalizeWebsiteUrlClient(raw) {
+  let v = (raw || '').trim();
+  if (!v) return { valid: false, normalized: '', error: 'Please enter a website URL.' };
+  if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
+  v = v.replace(/\/+$/, '');
+  try {
+    const parsed = new URL(v);
+    if (!parsed.hostname.includes('.')) {
+      return { valid: false, normalized: v, error: 'Please enter a valid domain name (e.g. https://example.com).' };
+    }
+    return { valid: true, normalized: parsed.protocol + '//' + parsed.hostname };
+  } catch (err) {
+    return { valid: false, normalized: v, error: 'Invalid URL format. Example: https://example.com' };
+  }
+}
+
+function normalizeListicleInputBox() {
+  const input = document.getElementById('listicle-url');
+  if (!input || !input.value.trim()) return;
+  const check = normalizeWebsiteUrlClient(input.value);
+  if (check.valid) input.value = check.normalized;
+}
+
+function startListicleLoading() {
+  const card = document.getElementById('listicle-loading-card');
+  const btn = document.getElementById('find-listicles-btn');
+  card.classList.add('show');
+  for (let i = 1; i <= 4; i++) {
+    const el = document.getElementById('lf-step-' + i);
+    if (el) el.className = i === 1 ? 'active' : '';
+  }
+  btn.textContent = 'Scanning sitemap...';
+  let tick = 0;
+  _listicleStepTimer = setInterval(() => {
+    tick++;
+    if (tick === 1) {
+      document.getElementById('lf-step-1').className = 'done';
+      document.getElementById('lf-step-2').className = 'active';
+      btn.textContent = 'Filtering articles...';
+    } else if (tick === 2) {
+      document.getElementById('lf-step-2').className = 'done';
+      document.getElementById('lf-step-3').className = 'active';
+      btn.textContent = 'Analyzing articles...';
+    } else if (tick === 4) {
+      document.getElementById('lf-step-3').className = 'done';
+      document.getElementById('lf-step-4').className = 'active';
+      btn.textContent = 'Finalizing listicles...';
+    }
+  }, 2400);
+}
+
+function stopListicleLoading() {
+  clearInterval(_listicleStepTimer);
+  const card = document.getElementById('listicle-loading-card');
+  if (card) card.classList.remove('show');
+  const btn = document.getElementById('find-listicles-btn');
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = 'Find Listicles ↗';
+  }
+}
+
+async function findListicles() {
+  const input = document.getElementById('listicle-url');
+  const errBox = document.getElementById('listicle-error-box');
+  const emptyState = document.getElementById('listicle-empty-state');
+  const resultsWrap = document.getElementById('listicle-results-wrap');
+  const fewerNotice = document.getElementById('listicle-fewer-notice');
+  const btn = document.getElementById('find-listicles-btn');
+
+  errBox.classList.remove('show');
+  fewerNotice.classList.remove('show');
+
+  const check = normalizeWebsiteUrlClient(input.value);
+  if (!check.valid) {
+    errBox.textContent = check.error;
+    errBox.classList.add('show');
+    return;
+  }
+
+  input.value = check.normalized;
+  btn.disabled = true;
+  emptyState.style.display = 'none';
+  resultsWrap.style.display = 'none';
+  startListicleLoading();
+
+  try {
+    const res = await fetch('/api/listicle-finder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ websiteUrl: check.normalized })
+    });
+    const data = await res.json();
+    stopListicleLoading();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to scan website for listicles.');
+    }
+
+    _lastListicleScan = data;
+    const listicles = data.listicles || [];
+
+    if (listicles.length === 0) {
+      emptyState.style.display = 'block';
+      document.getElementById('listicle-empty-text').textContent =
+        data.notice || `No listicle-style articles were found on ${check.normalized} (scanned ${data.totalUrlsScanned || 0} URLs).`;
+      return;
+    }
+
+    if (listicles.length < 10) {
+      fewerNotice.textContent =
+        '⚠️ ' + (data.notice || `Only ${listicles.length} listicle article(s) were found on this website. Showing all available results.`);
+      fewerNotice.classList.add('show');
+    }
+
+    document.getElementById('listicle-count-label').textContent =
+      `Found ${listicles.length} Listicle Article${listicles.length === 1 ? '' : 's'} (scanned ${data.totalUrlsScanned || 0} URLs)`;
+
+    const tbody = document.getElementById('listicle-table-body');
+    tbody.innerHTML = listicles.map((item, idx) => {
+      const isHigh = String(item.confidence || '').toLowerCase() === 'high';
+      const confClass = isHigh ? 'conf-high' : 'conf-medium';
+      const confLabel = isHigh ? 'High' : 'Medium';
+      return `<tr>
+        <td style="font-family:'DM Mono',monospace; color:var(--text3);">${idx + 1}</td>
+        <td style="font-weight:500; max-width:240px;">${escapeHtml(item.title || '')}</td>
+        <td style="max-width:240px;">
+          <a class="listicle-url-link" href="${escapeHtml(item.url || '')}" target="_blank" rel="noopener noreferrer">
+            ${escapeHtml(item.url || '')} ↗
+          </a>
+        </td>
+        <td><span class="type-badge">${escapeHtml(item.type || 'Best of')}</span></td>
+        <td><span class="conf-badge ${confClass}">${confLabel}</span></td>
+        <td style="text-align:right;">
+          <button type="button" class="btn-action-sm" id="lf-copy-${idx}" onclick="copyListicleUrl(${idx})">
+            Copy
+          </button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    resultsWrap.style.display = 'block';
+  } catch (err) {
+    stopListicleLoading();
+    errBox.textContent = err.message || 'Failed to find listicles. Please try again.';
+    errBox.classList.add('show');
+  }
+}
+
+function copyListicleUrl(idx) {
+  if (!_lastListicleScan || !_lastListicleScan.listicles || !_lastListicleScan.listicles[idx]) return;
+  const url = _lastListicleScan.listicles[idx].url;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.getElementById('lf-copy-' + idx);
+    if (!btn) return;
+    btn.textContent = '✓ Copied';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1800);
+  });
+}
+
+function copyAllListicleUrls() {
+  if (!_lastListicleScan || !_lastListicleScan.listicles || !_lastListicleScan.listicles.length) return;
+  const all = _lastListicleScan.listicles.map(item => item.url).join('\n');
+  navigator.clipboard.writeText(all).then(() => {
+    const btn = document.getElementById('copy-all-listicles-btn');
+    if (!btn) return;
+    btn.textContent = '✓ Copied All!';
+    setTimeout(() => { btn.textContent = '📋 Copy all'; }, 2000);
+  });
+}
+
+function exportListiclesCSV() {
+  if (!_lastListicleScan || !_lastListicleScan.listicles || !_lastListicleScan.listicles.length) return;
+  const escapeCSV = (val) => '"' + String(val || '').replace(/"/g, '""') + '"';
+  let csv = 'No.,Article Title,URL,Listicle Type,Confidence\n';
+  _lastListicleScan.listicles.forEach((item, idx) => {
+    csv += [
+      escapeCSV(idx + 1),
+      escapeCSV(item.title),
+      escapeCSV(item.url),
+      escapeCSV(item.type),
+      escapeCSV(item.confidence)
+    ].join(',') + '\n';
+  });
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  let host = 'website';
+  try { host = new URL(_lastListicleScan.website).hostname.replace(/^www\./, ''); } catch (e) {}
+  link.setAttribute('href', url);
+  link.setAttribute('download', `Listicles_${host}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
 </script>
 </body>
 </html>

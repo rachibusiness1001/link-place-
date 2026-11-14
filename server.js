@@ -31,6 +31,9 @@ connectDB();
 const anchorHuntRoute = require('./src/routes/anchorHunt');
 app.use('/', anchorHuntRoute);
 
+const listicleFinderRoute = require('./src/routes/listicleFinder');
+app.use('/api/listicle-finder', listicleFinderRoute);
+
 const placementNormalRoute = require('./src/routes/placementNormal');
 const placementBrandedRoute = require('./src/routes/placementBranded');
 
