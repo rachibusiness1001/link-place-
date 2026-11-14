@@ -27,6 +27,7 @@ interface User {
   email: string | null;
   role?: string;
   token?: string;
+  tokens?: number;
 }
 
 interface AppState {

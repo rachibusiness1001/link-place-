@@ -97,7 +97,7 @@ export default function BrandedAnchorPage() {
 
       // Decrease local tokens if successful search
       if (user) {
-        useAppStore.getState().setUser({ ...user, tokens: Math.max(0, user.tokens - 1) });
+        useAppStore.getState().setUser({ ...user, tokens: Math.max(0, (user.tokens ?? 0) - 1) });
       }
 
       setResults(data.suggestions || []);

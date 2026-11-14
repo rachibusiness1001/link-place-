@@ -128,7 +128,7 @@ export default function ToolPage() {
       
       // Decrease local tokens if successful search
       if (user) {
-        useAppStore.getState().setUser({ ...user, tokens: Math.max(0, user.tokens - 1) });
+        useAppStore.getState().setUser({ ...user, tokens: Math.max(0, (user.tokens ?? 0) - 1) });
       }
       
       // Deduplicate: keep only one suggestion per article URL
@@ -196,7 +196,7 @@ export default function ToolPage() {
       
       // Decrease local tokens if successful search
       if (user) {
-        useAppStore.getState().setUser({ ...user, tokens: Math.max(0, user.tokens - 1) });
+        useAppStore.getState().setUser({ ...user, tokens: Math.max(0, (user.tokens ?? 0) - 1) });
       }
       
       // Deduplicate: keep only one suggestion per article URL
