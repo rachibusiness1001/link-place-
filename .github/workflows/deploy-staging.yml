@@ -28,7 +28,10 @@ jobs:
         run: npm run build
 
       - name: Deploy Frontend via FTP
-        if: ${{ secrets.FTP_SERVER != '' }}
+        continue-on-error: true
+        env:
+          FTP_SERVER_CHECK: ${{ secrets.FTP_SERVER }}
+        if: env.FTP_SERVER_CHECK != ''
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
