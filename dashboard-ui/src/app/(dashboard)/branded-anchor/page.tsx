@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link as LinkIcon, FileText, Anchor, Sparkles, Globe, CheckCircle2, Circle, AlertCircle, Download, BookMarked, Plus, FolderOpen } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
+import ListicleFinderSection from '@/components/ListicleFinderSection';
 
 const LOADING_STEPS = [
   "Analyzing target URL topic...",
@@ -523,7 +524,8 @@ export default function BrandedAnchorPage() {
         </AnimatePresence>
       </motion.div>
 
-
+      {/* Listicle Finder Section directly below Branded Placement */}
+      <ListicleFinderSection />
     </motion.div>
   );
 }
