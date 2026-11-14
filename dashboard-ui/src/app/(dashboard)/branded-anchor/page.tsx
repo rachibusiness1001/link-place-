@@ -29,7 +29,7 @@ export default function BrandedAnchorPage() {
 
 
   // Project management
-  const { projects, addProject, savePlacement } = useAppStore();
+  const { projects, addProject, savePlacement, recordToolUsage } = useAppStore();
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
@@ -93,6 +93,7 @@ export default function BrandedAnchorPage() {
       }
 
       setResults(data.suggestions || []);
+      recordToolUsage("Branded Anchor", domain, 15);
     } catch (err: any) {
       setError(err);
     } finally {

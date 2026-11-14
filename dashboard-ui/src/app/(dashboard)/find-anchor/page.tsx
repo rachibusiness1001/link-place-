@@ -3,8 +3,10 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Globe, Link as LinkIcon, Search, CheckCircle2, AlertCircle, ExternalLink, Copy, ChevronRight, Loader2, Download } from 'lucide-react';
+import { useAppStore } from '@/store/useAppStore';
 
 export default function FindAnchorPage() {
+  const { recordToolUsage } = useAppStore();
   const [websiteUrl, setWebsiteUrl] = useState('');
   const [anchorText, setAnchorText] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -31,6 +33,7 @@ export default function FindAnchorPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to search. Please try again.");
       setResults({ ...data, websiteUrl: websiteUrl.trim(), anchorText: anchorText.trim() });
+      recordToolUsage("Find Anchor", websiteUrl.trim(), 5);
     } catch (err: any) {
       setError(err.message);
     } finally {

@@ -32,7 +32,7 @@ export default function ToolPage() {
   const [selectedVariations, setSelectedVariations] = useState<Set<string>>(new Set());
 
   // Project management
-  const { projects, addProject, savePlacement } = useAppStore();
+  const { projects, addProject, savePlacement, recordToolUsage } = useAppStore();
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
@@ -131,6 +131,7 @@ export default function ToolPage() {
         return true;
       });
       setResults(uniqueSuggestions);
+      recordToolUsage("Find Placement", domain, 20);
     } catch (err: any) {
       setError(err);
     } finally {
@@ -191,6 +192,7 @@ export default function ToolPage() {
         return true;
       });
       setResults(uniqueSuggestions);
+      recordToolUsage("Find Placement", domain, 20);
     } catch (err: any) {
       setError(err);
     } finally {

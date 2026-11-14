@@ -10,9 +10,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
 import { useRouter } from "next/navigation"
+import { useAppStore } from "@/store/useAppStore"
 
 export default function SignupPage() {
   const router = useRouter()
+  const { loginWithEmail } = useAppStore()
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -31,15 +33,18 @@ export default function SignupPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (formData.password !== formData.confirmPassword) {
-      console.log("[v0] Password mismatch")
+      alert("Passwords do not match")
       return
     }
     setIsLoading(true)
-    // Simulate signup process
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    const user = loginWithEmail(formData.email, formData.name)
     setIsLoading(false)
-    console.log("[v0] Signup attempt:", formData)
-    router.push("/dashboard")
+    if (user.role === "super_admin" || user.role === "sub_admin") {
+      router.push("/settings")
+    } else {
+      router.push("/dashboard")
+    }
   }
 
   return (

@@ -16,6 +16,7 @@ import {
   Info,
   Sparkles,
 } from "lucide-react";
+import { useAppStore } from "@/store/useAppStore";
 
 interface ListicleItem {
   title: string;
@@ -78,6 +79,7 @@ function normalizeWebsiteInput(raw: string): { valid: boolean; normalized: strin
 }
 
 export default function ListicleFinderSection({ standalone = false }: { standalone?: boolean }) {
+  const { recordToolUsage } = useAppStore();
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [isScanning, setIsScanning] = useState(false);
   const [progressStep, setProgressStep] = useState(0);
@@ -143,6 +145,7 @@ export default function ListicleFinderSection({ standalone = false }: { standalo
       }
 
       setScanResult(data);
+      recordToolUsage("Listicle Finder", check.normalized, 10);
     } catch (err: any) {
       setError(err.message || "Something went wrong while scanning for listicles.");
     } finally {
