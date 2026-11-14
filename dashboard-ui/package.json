@@ -44,6 +44,7 @@
     "cobe": "^2.0.1",
     "date-fns": "^4.4.0",
     "embla-carousel-react": "^8.6.0",
+    "firebase": "^12.17.1",
     "framer-motion": "^12.42.2",
     "geist": "^1.7.2",
     "input-otp": "^1.4.2",

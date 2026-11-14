@@ -6,6 +6,8 @@ const { Readability } = require("@mozilla/readability");
 const NodeCache = require("node-cache");
 const fs = require("fs");
 const path = require("path");
+const User = require("../models/User");
+const SearchLog = require("../models/SearchLog");
 
 const {
   validateInputs,
@@ -500,6 +502,11 @@ router.post("/", async (req, res) => {
   const validationError = validateInputs(domain, anchor, linkto);
   if (validationError) return res.status(400).json({ error: validationError });
 
+  const user = await User.findOne({ uid: req.user.uid });
+  if (!user || user.tokens < 1) {
+    return res.status(403).json({ error: "Insufficient tokens. Please recharge or enter a promo code." });
+  }
+
   const excludeHash = (excludedParagraphs.length > 0 || excludedArticleUrls.length > 0)
     ? crypto.createHash("md5").update([...excludedParagraphs, ...excludedArticleUrls].join("|")).digest("hex").slice(0, 16)
     : "0";
@@ -515,17 +522,41 @@ router.post("/", async (req, res) => {
 
   const cacheKey = `${domain}::${anchorList.join("||").toLowerCase().trim()}::${linkto.toLowerCase().trim()}::${excludeHash}::false`;
 
-  const useCache = excludedParagraphs.length === 0 && excludedArticleUrls.length === 0;
-  const cached = useCache ? cache.get(cacheKey) : null;
-  if (cached) return res.status(200).json({ ...cached, cached: true });
-  if (inFlight.has(cacheKey)) {
-    try { const result = await inFlight.get(cacheKey); return res.status(200).json({ ...result, cached: true }); }
-    catch { return res.status(500).json({ error: "Analysis failed. Please try again." }); }
-  }
-
   const attemptAnalysis = async () => {
     return await runAnalysisWithFallback(domain, anchorList, linkto, excludedParagraphs, excludedArticleUrls);
   };
+
+  const handleSuccess = async (responseObj) => {
+    // Deduct token
+    user.tokens -= 1;
+    await user.save();
+    
+    // Log the search
+    await SearchLog.create({
+      userId: user._id,
+      domain,
+      anchor,
+      targetUrl: linkto,
+      type: 'normal',
+      status: 'success'
+    });
+  };
+
+  const useCache = excludedParagraphs.length === 0 && excludedArticleUrls.length === 0;
+  const cached = useCache ? cache.get(cacheKey) : null;
+  if (cached) {
+    await handleSuccess(cached);
+    return res.status(200).json({ ...cached, cached: true });
+  }
+  
+  if (inFlight.has(cacheKey)) {
+    try { 
+      const result = await inFlight.get(cacheKey); 
+      await handleSuccess(result);
+      return res.status(200).json({ ...result, cached: true }); 
+    }
+    catch { return res.status(500).json({ error: "Analysis failed. Please try again." }); }
+  }
 
   const promise = attemptAnalysis().finally(() => inFlight.delete(cacheKey));
   inFlight.set(cacheKey, promise);
@@ -533,8 +564,18 @@ router.post("/", async (req, res) => {
     const results = await promise;
     const response = { ...results, cached: false };
     cache.set(cacheKey, response);
+    await handleSuccess(response);
     return res.status(200).json(response);
   } catch (err) {
+    // Log failed search
+    await SearchLog.create({
+      userId: user._id,
+      domain,
+      anchor,
+      targetUrl: linkto,
+      type: 'normal',
+      status: 'failed'
+    });
     if (err.code === "no_valid_placement_any_anchor") {
       return res.status(404).json({
         error: "no_valid_placement_any_anchor",
