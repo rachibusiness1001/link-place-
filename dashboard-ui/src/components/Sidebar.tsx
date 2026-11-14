@@ -15,7 +15,8 @@ import {
   LogOut,
   Info,
   ChevronRight,
-  BookMarked
+  BookMarked,
+  ListChecks
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 
@@ -38,6 +39,7 @@ export default function Sidebar() {
   const mainMenu = [
     { name: 'Dashboard', href: '/dashboard', icon: Home },
     { name: 'Find Placement', href: '/tool', icon: Search },
+    { name: 'Listicle Finder', href: '/listicle-finder', icon: ListChecks },
     { name: 'Branded Anchor', href: '/branded-anchor', icon: Anchor },
     { name: 'Find Anchor', href: '/find-anchor', icon: LinkIcon },
     { name: 'All Projects', href: '/manage-placements', icon: BookMarked },

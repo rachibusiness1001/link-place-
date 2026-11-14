@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Globe, Link as LinkIcon, Search, CheckCircle2, AlertCircle, ExternalLink, Copy, ChevronRight, Loader2, Download } from 'lucide-react';
+import ListicleFinderSection from '@/components/ListicleFinderSection';
 
 export default function FindAnchorPage() {
   const [websiteUrl, setWebsiteUrl] = useState('');
@@ -247,6 +248,9 @@ export default function FindAnchorPage() {
           ))}
         </div>
       </div>
+
+      {/* Listicle Finder Section directly below Find Anchor */}
+      <ListicleFinderSection />
     </motion.div>
   );
 }

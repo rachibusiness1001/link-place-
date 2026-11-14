@@ -77,7 +77,7 @@ function normalizeWebsiteInput(raw: string): { valid: boolean; normalized: strin
   }
 }
 
-export default function ListicleFinderSection() {
+export default function ListicleFinderSection({ standalone = false }: { standalone?: boolean }) {
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [isScanning, setIsScanning] = useState(false);
   const [progressStep, setProgressStep] = useState(0);
@@ -179,7 +179,7 @@ export default function ListicleFinderSection() {
   };
 
   return (
-    <div className="mt-14 pt-10 border-t border-white/10 pb-12">
+    <div className={standalone ? "pt-4 pb-12" : "mt-14 pt-10 border-t border-white/10 pb-12"}>
       {/* Section Header */}
       <div className="mb-8">
         <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-[#6366f1]/30 bg-[#6366f1]/10 text-[#6366f1] text-[10px] font-bold uppercase tracking-widest mb-3">
